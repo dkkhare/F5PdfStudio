@@ -2524,13 +2524,82 @@ def start_remote_ltx23_video_generation(
 # ================================================================
 
 CUSTOM_CSS = """
-.gradio-container {
-    max-width: 1300px !important;
+:root {
+    color-scheme: light;
+    --f5-ink: #172235; --f5-line: #e7eaf0; --f5-paper: #f6f7fb;
+    --f5-navy: #111b2c; --f5-accent: #6b63d9; --f5-accent-dark: #554cc5;
 }
-
-.status-output textarea {
-    font-family: Consolas, monospace !important;
+body, .gradio-container {
+    background: var(--f5-paper) !important; color: var(--f5-ink) !important;
+    font-family: Inter, "Segoe UI", Arial, sans-serif !important;
 }
+.gradio-container { max-width:1680px !important; padding:18px 24px 36px !important; }
+#f5pdfstudio-app .f5-brandbar {
+    display:flex; align-items:center; gap:13px; padding:12px 4px 20px;
+    border-bottom:1px solid var(--f5-line); margin-bottom:20px;
+}
+#f5pdfstudio-app .f5-brandmark {
+    width:43px; height:43px; border-radius:14px; display:grid; place-items:center;
+    color:#fff; font-weight:900; letter-spacing:-1px;
+    background:linear-gradient(145deg,#8e86f2,#5e56c9); box-shadow:0 7px 20px #655bd94d;
+}
+#f5pdfstudio-app .f5-brandcopy { display:grid; gap:1px; }
+#f5pdfstudio-app .f5-brandcopy strong { color:#172235; font-size:17px; letter-spacing:-.4px; }
+#f5pdfstudio-app .f5-brandcopy small { color:#8792a5; font-size:9px; font-weight:800; letter-spacing:1.5px; }
+#f5pdfstudio-app .f5-local-pill {
+    margin-left:auto; padding:7px 11px; border-radius:20px; background:#eaf7f2;
+    color:#25856f; font-size:10px; font-weight:800; letter-spacing:.5px;
+}
+#f5pdfstudio-app .f5-welcome {
+    overflow:hidden; margin:0 0 20px; padding:25px 30px; border-radius:17px; color:#fff;
+    background:linear-gradient(112deg,#202b48 0%,#333b66 55%,#625eb1 100%);
+    box-shadow:0 12px 28px #2731531c;
+}
+#f5pdfstudio-app .f5-welcome .eyebrow { color:#c5c2ff; font-size:10px; font-weight:800; letter-spacing:1.6px; }
+#f5pdfstudio-app .f5-welcome h2 { margin:9px 0 7px; color:#fff; font-size:clamp(24px,3vw,34px); line-height:1.15; letter-spacing:-1px; }
+#f5pdfstudio-app .f5-welcome p { margin:0; color:#d1d6e8; font-size:13px; }
+#f5pdfstudio-app .tabs {
+    display:grid !important; grid-template-columns:238px minmax(0,1fr) !important;
+    align-items:start !important; gap:20px !important;
+}
+#f5pdfstudio-app .tab-nav {
+    display:flex !important; flex-direction:column !important; align-items:stretch !important;
+    gap:6px !important; padding:13px !important; margin:0 !important; position:sticky; top:14px;
+    background:var(--f5-navy) !important; border:1px solid #24324a !important;
+    border-radius:15px !important; box-shadow:0 8px 24px #17223512;
+}
+#f5pdfstudio-app .tab-nav button {
+    width:100% !important; min-height:43px !important; justify-content:flex-start !important;
+    text-align:left !important; padding:10px 13px !important; margin:0 !important;
+    border:0 !important; border-radius:9px !important; background:transparent !important;
+    color:#aeb9cc !important; font-size:12px !important; font-weight:650 !important;
+    box-shadow:none !important; transition:background .18s,color .18s !important;
+}
+#f5pdfstudio-app .tab-nav button:hover { background:#ffffff0d !important; color:#fff !important; transform:none !important; }
+#f5pdfstudio-app .tab-nav button.selected,
+#f5pdfstudio-app .tab-nav button[aria-selected="true"] {
+    background:#7169df30 !important; color:#fff !important; box-shadow:inset 3px 0 #8982f3 !important;
+}
+#f5pdfstudio-app .tab-nav button::after { display:none !important; }
+#f5pdfstudio-app .tabitem {
+    min-width:0 !important; padding:23px !important; margin:0 !important;
+    background:#fff !important; border:1px solid var(--f5-line) !important;
+    border-radius:15px !important; box-shadow:0 4px 18px #202b4208;
+}
+#f5pdfstudio-app input, #f5pdfstudio-app textarea, #f5pdfstudio-app select { border-radius:8px !important; }
+#f5pdfstudio-app button { border-radius:8px !important; font-weight:650 !important; }
+#f5pdfstudio-app button.primary { background:var(--f5-accent) !important; border-color:var(--f5-accent) !important; }
+#f5pdfstudio-app button.primary:hover { background:var(--f5-accent-dark) !important; border-color:var(--f5-accent-dark) !important; }
+#f5pdfstudio-app h1, #f5pdfstudio-app h2, #f5pdfstudio-app h3 { letter-spacing:-.35px; }
+.status-output textarea { font-family:Consolas, "Cascadia Code", monospace !important; font-size:12px !important; }
+@media (max-width:900px) {
+    .gradio-container { padding:12px !important; }
+    #f5pdfstudio-app .tabs { grid-template-columns:1fr !important; gap:12px !important; }
+    #f5pdfstudio-app .tab-nav { position:static; flex-direction:row !important; overflow-x:auto !important; white-space:nowrap; padding:8px !important; }
+    #f5pdfstudio-app .tab-nav button { width:auto !important; flex:0 0 auto !important; }
+    #f5pdfstudio-app .tabitem { padding:15px !important; }
+}
+@media (prefers-reduced-motion:reduce) { #f5pdfstudio-app * { transition:none !important; scroll-behavior:auto !important; } }
 """
 
 
@@ -2613,17 +2682,25 @@ def _stop_stage(name, also_video=False):
     return action
 
 
-with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio") as demo:
+with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f5pdfstudio-app") as demo:
     gr.Markdown("""
-# F5PdfStudio — Local AI + Colab Media Studio
-
-**Local Windows:** Ollama + F5-TTS + SadTalker  
-**Google Colab:** Fish Speech + Wan2.2 + LTX-2.5 + LTX-2.3 ComfyUI  
-**Cloud tab:** Gemini API / TTS / Veo
+<div class="f5-brandbar">
+  <div class="f5-brandmark">F5</div>
+  <div class="f5-brandcopy">
+    <strong>F5PdfStudio</strong>
+    <small>DOCUMENT · AUDIOBOOK · VIDEO WORKSPACE</small>
+  </div>
+  <div class="f5-local-pill">● LOCAL WORKSPACE</div>
+</div>
+<div class="f5-welcome">
+  <div class="eyebrow">YOUR AI BOOK PRODUCTION STUDIO</div>
+  <h2>From document to audiobook and video.</h2>
+  <p>Extract, refine, narrate and produce your book with your existing local and cloud AI tools.</p>
+</div>
 """)
 
-    with gr.Tab("1. Open / New Project"):
-        gr.Markdown("Select an existing project or create a new one.")
+    with gr.Tab("Overview / Projects"):
+        gr.Markdown("### Project workspace\nOpen an existing book project or create a new one. Your saved sections, audio checkpoints and video outputs remain in their existing project folders.")
         with gr.Row():
             existing_project = gr.Dropdown(choices=[NEW_PROJECT_CHOICE, *list_existing_projects()], value=NEW_PROJECT_CHOICE, label="Existing project / New project")
             refresh_projects_button = gr.Button("Refresh project list")
@@ -2642,7 +2719,7 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio") as demo:
         refresh_pipeline_button = gr.Button("Refresh pipeline status")
         pipeline_timer = gr.Timer(5) if hasattr(gr, "Timer") else None
 
-    with gr.Tab("2. Document and OCR"):
+    with gr.Tab("Document & OCR"):
         with gr.Row():
             document_file = gr.File(label="Upload PDF or Word document", file_types=[".pdf", ".docx", ".doc"], type="filepath")
             with gr.Column():
@@ -2658,7 +2735,7 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio") as demo:
             stop_extract_button = gr.Button("Stop after current page/block", variant="stop")
         extraction_status = gr.Textbox(label="Extraction status", value="Upload a document to begin.", lines=8, interactive=False, elem_classes=["status-output"])
 
-    with gr.Tab("3. Correct and structure text"):
+    with gr.Tab("Text Editor"):
         with gr.Row():
             correction_engine = gr.Dropdown(choices=[("Ollama — local", "ollama"), ("Gemini API — cloud", "gemini")], value="ollama", label="Text correction engine", scale=1)
             max_characters = gr.Slider(300, 2000, value=1200, step=100, label="Target characters per section", scale=1)
@@ -2694,7 +2771,7 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio") as demo:
         ollama_status = gr.Textbox(label="Ollama status", lines=10, interactive=False, elem_classes=["status-output"])
         section_preview = gr.Textbox(label="Chapter and section preview", lines=20, interactive=False)
 
-    with gr.Tab("4. Audio Tools"):
+    with gr.Tab("Audio Production"):
         gr.Markdown("## All audio engines are in this tab. Select one option for generation.")
         with gr.Row():
             tts_engine = gr.Dropdown(choices=[
@@ -2775,7 +2852,7 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio") as demo:
             wav_download = gr.File(label="Download complete WAV")
             mp3_download = gr.File(label="Download complete MP3")
 
-    with gr.Tab("5. Video Tools"):
+    with gr.Tab("Video Production"):
         gr.Markdown(
             "## Select a video engine. Only the settings of the selected engine are shown.\n"
             "For every section the section **audio** is sent to the video tool, the section **text** is burned on the "
@@ -2936,7 +3013,7 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio") as demo:
             ltx23_preview = gr.Video(label="LTX-2.3 result")
             ltx23_download = gr.File(label="Download combined clips / section videos", file_count="multiple")
 
-    with gr.Tab("6. Gemini API"):
+    with gr.Tab("Cloud AI"):
         gr.Markdown("## Gemini API — separate cloud tab")
         with gr.Row():
             gemini_api_key = gr.Textbox(label="Gemini API key (not saved)", type="password")
@@ -2970,7 +3047,7 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio") as demo:
         gemini_video_preview = gr.Video(label="Gemini Veo video")
         gemini_video_download = gr.File(label="Gemini Veo clips / section videos", file_count="multiple")
 
-    with gr.Tab("7. Check Status"):
+    with gr.Tab("System Status"):
         check_button = gr.Button("Check complete installation", variant="primary")
         setup_report = gr.Textbox(label="Local installation report", lines=22, interactive=False, elem_classes=["status-output"])
         colab_setup_status = gr.Textbox(label="Colab media server", lines=8, interactive=False, elem_classes=["status-output"])
