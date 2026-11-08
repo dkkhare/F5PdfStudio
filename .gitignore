@@ -1,0 +1,85 @@
+
+# Secrets and environment configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+credentials/
+
+# Python environments
+venv/
+.venv/
+env/
+myenv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local application data
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs and temporary files
+logs/
+*.log
+tmp/
+temp/
+.cache/
+cache/
+*.tmp
+
+# Generated audio and video
+outputs/
+output/
+generated/
+generated_audio/
+generated_video/
+*.wav
+*.mp3
+*.mp4
+*.mkv
+
+# Downloaded AI models and checkpoints
+models/
+checkpoints/
+weights/
+*.safetensors
+*.ckpt
+*.pth
+*.pt
+*.gguf
+*.bin
+
+# Uploaded/private source documents
+uploads/
+input/
+inputs/
+*.pdf
+*.docx
+*.doc
+
+# IDE and operating system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# SadTalker generated files
+_sadtalker_work/
+
+# Local project archives
+*.zip
+
+# Generated production outputs
+outputs*/
+output*/
+
+# Personal reference images
+poet_portrait.png

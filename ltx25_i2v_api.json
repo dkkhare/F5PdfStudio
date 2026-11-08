@@ -1,0 +1,709 @@
+{
+  "269": {
+    "inputs": {
+      "image": "reference_crop_640x320.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image",
+      "cnr_id": "comfy-core",
+      "ver": "0.16.3"
+    }
+  },
+  "276": {
+    "inputs": {
+      "audio": "niya_voice2.wav"
+    },
+    "class_type": "LoadAudio",
+    "_meta": {
+      "title": "Load Audio",
+      "cnr_id": "comfy-core",
+      "ver": "0.16.3"
+    }
+  },
+  "346": {
+    "inputs": {
+      "noise_seed": 933487736679550
+    },
+    "class_type": "RandomNoise",
+    "_meta": {
+      "title": "RandomNoise",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.56"
+    }
+  },
+  "351": {
+    "inputs": {
+      "noise": [
+        "346",
+        0
+      ],
+      "guider": [
+        "365",
+        0
+      ],
+      "sampler": [
+        "355",
+        0
+      ],
+      "sigmas": [
+        "360",
+        0
+      ],
+      "latent_image": [
+        "453",
+        0
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced",
+    "_meta": {
+      "title": "SamplerCustomAdvanced",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.60"
+    }
+  },
+  "352": {
+    "inputs": {
+      "positive": [
+        "359",
+        0
+      ],
+      "negative": [
+        "359",
+        1
+      ],
+      "latent": [
+        "361",
+        1
+      ]
+    },
+    "class_type": "LTXVCropGuides",
+    "_meta": {
+      "title": "LTXVCropGuides",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.68"
+    }
+  },
+  "355": {
+    "inputs": {
+      "sampler_name": "euler_ancestral_cfg_pp"
+    },
+    "class_type": "KSamplerSelect",
+    "_meta": {
+      "title": "KSamplerSelect",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.56"
+    }
+  },
+  "357": {
+    "inputs": {
+      "samples": [
+        "352",
+        2
+      ],
+      "audio_vae": [
+        "498",
+        0
+      ]
+    },
+    "class_type": "LTXVAudioVAEDecode",
+    "_meta": {
+      "title": "LTXV Audio VAE Decode",
+      "cnr_id": "comfy-core",
+      "ver": "0.7.0"
+    }
+  },
+  "358": {
+    "inputs": {
+      "text": [
+        "459",
+        0
+      ],
+      "clip": [
+        "397",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Prompt)",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.56"
+    }
+  },
+  "359": {
+    "inputs": {
+      "frame_rate": [
+        "441",
+        0
+      ],
+      "positive": [
+        "358",
+        0
+      ],
+      "negative": [
+        "364",
+        0
+      ]
+    },
+    "class_type": "LTXVConditioning",
+    "_meta": {
+      "title": "LTXVConditioning",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.56"
+    }
+  },
+  "360": {
+    "inputs": {
+      "sigmas": "1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0"
+    },
+    "class_type": "ManualSigmas",
+    "_meta": {
+      "title": "ManualSigmas",
+      "cnr_id": "comfy-core",
+      "ver": "0.14.1"
+    }
+  },
+  "361": {
+    "inputs": {
+      "av_latent": [
+        "351",
+        0
+      ]
+    },
+    "class_type": "LTXVSeparateAVLatent",
+    "_meta": {
+      "title": "Separate AV Latent",
+      "cnr_id": "comfy-core",
+      "ver": "0.5.1"
+    }
+  },
+  "364": {
+    "inputs": {
+      "text": "low quality, static, silent",
+      "clip": [
+        "397",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Prompt)",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.56"
+    }
+  },
+  "365": {
+    "inputs": {
+      "cfg": 1,
+      "model": [
+        "446",
+        0
+      ],
+      "positive": [
+        "359",
+        0
+      ],
+      "negative": [
+        "359",
+        1
+      ]
+    },
+    "class_type": "CFGGuider",
+    "_meta": {
+      "title": "CFG Guider",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.64"
+    }
+  },
+  "366": {
+    "inputs": {
+      "tile_size": 384,
+      "overlap": 64,
+      "temporal_size": 4096,
+      "temporal_overlap": 4,
+      "samples": [
+        "464",
+        0
+      ],
+      "vae": [
+        "496",
+        0
+      ]
+    },
+    "class_type": "VAEDecodeTiled",
+    "_meta": {
+      "title": "VAE Decode (Tiled)",
+      "cnr_id": "comfy-core",
+      "ver": "0.14.1"
+    }
+  },
+  "378": {
+    "inputs": {
+      "value": 15
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "Duration",
+      "cnr_id": "comfy-core",
+      "ver": "0.16.3"
+    }
+  },
+  "379": {
+    "inputs": {
+      "value": 24
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Frame Rate",
+      "cnr_id": "comfy-core",
+      "ver": "0.16.3"
+    }
+  },
+  "383": {
+    "inputs": {
+      "start_index": 0,
+      "duration": [
+        "378",
+        0
+      ],
+      "audio": [
+        "276",
+        0
+      ]
+    },
+    "class_type": "TrimAudioDuration",
+    "_meta": {
+      "title": "Trim Audio Duration",
+      "cnr_id": "comfy-core",
+      "ver": "0.16.3"
+    }
+  },
+  "397": {
+    "inputs": {
+      "clip_name1": "gemma-3-12b-it-IQ4_XS.gguf",
+      "clip_name2": "ltx-2.3_text_projection_bf16.safetensors",
+      "type": "ltxv",
+      "device": "cuda:1",
+      "virtual_vram_gb": 0,
+      "donor_device": "cpu",
+      "expert_mode_allocations": "",
+      "eject_models": false
+    },
+    "class_type": "DualCLIPLoaderGGUFDisTorch2MultiGPU",
+    "_meta": {
+      "title": "CLIP  ( Gemma GGUF+ LTX embedding)",
+      "cnr_id": "ComfyUI-MultiGPU",
+      "aux_id": "pollockjj/ComfyUI-MultiGPU",
+      "ver": "6ea2651e7df66d7585f6ffee804b20e92fb38b8a"
+    }
+  },
+  "400": {
+    "inputs": {
+      "frame_rate": [
+        "441",
+        0
+      ],
+      "loop_count": 0,
+      "filename_prefix": "LTX 2.3 I+A2V",
+      "format": "video/nvenc_h264-mp4",
+      "pix_fmt": "yuv420p",
+      "bitrate": 25,
+      "megabit": true,
+      "save_metadata": true,
+      "pingpong": false,
+      "save_output": true,
+      "images": [
+        "366",
+        0
+      ],
+      "audio": [
+        "357",
+        0
+      ]
+    },
+    "class_type": "VHS_VideoCombine",
+    "_meta": {
+      "title": "Video Combine 🎥🅥🅗🅢",
+      "cnr_id": "comfyui-videohelpersuite",
+      "ver": "993082e4f2473bf4acaf06f51e33877a7eb38960"
+    }
+  },
+  "441": {
+    "inputs": {
+      "expression": "a",
+      "values.a": [
+        "379",
+        0
+      ]
+    },
+    "class_type": "ComfyMathExpression",
+    "_meta": {
+      "title": "Math Expression",
+      "cnr_id": "comfy-core",
+      "ver": "0.16.3"
+    }
+  },
+  "442": {
+    "inputs": {
+      "expression": "a * b",
+      "values.a": [
+        "378",
+        0
+      ],
+      "values.b": [
+        "379",
+        0
+      ]
+    },
+    "class_type": "ComfyMathExpression",
+    "_meta": {
+      "title": "Math Expression",
+      "cnr_id": "comfy-core",
+      "ver": "0.16.3"
+    }
+  },
+  "446": {
+    "inputs": {
+      "lora_name": "LTX-2.3-22b-AV-LoRA-talking-head-v1.safetensors",
+      "strength_model": 0.88,
+      "model": [
+        "482",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "Load LoRA",
+      "cnr_id": "comfy-core",
+      "ver": "0.18.1"
+    }
+  },
+  "453": {
+    "inputs": {
+      "video_latent": [
+        "457",
+        0
+      ],
+      "audio_latent": [
+        "454",
+        0
+      ]
+    },
+    "class_type": "LTXVConcatAVLatent",
+    "_meta": {
+      "title": "Concat AV Latent",
+      "cnr_id": "comfy-core",
+      "ver": "0.7.0"
+    }
+  },
+  "454": {
+    "inputs": {
+      "samples": [
+        "455",
+        0
+      ],
+      "mask": [
+        "456",
+        0
+      ]
+    },
+    "class_type": "SetLatentNoiseMask",
+    "_meta": {
+      "title": "Set Latent Noise Mask",
+      "cnr_id": "comfy-core",
+      "ver": "0.7.0"
+    }
+  },
+  "455": {
+    "inputs": {
+      "audio": [
+        "383",
+        0
+      ],
+      "audio_vae": [
+        "498",
+        0
+      ]
+    },
+    "class_type": "LTXVAudioVAEEncode",
+    "_meta": {
+      "title": "LTXV Audio VAE Encode",
+      "cnr_id": "comfy-core",
+      "ver": "0.16.3"
+    }
+  },
+  "456": {
+    "inputs": {
+      "value": 0,
+      "width": [
+        "473",
+        1
+      ],
+      "height": [
+        "473",
+        2
+      ]
+    },
+    "class_type": "SolidMask",
+    "_meta": {
+      "title": "Create Solid Mask",
+      "cnr_id": "comfy-core",
+      "ver": "0.7.0"
+    }
+  },
+  "457": {
+    "inputs": {
+      "strength": 0.7,
+      "bypass": false,
+      "vae": [
+        "496",
+        0
+      ],
+      "image": [
+        "465",
+        0
+      ],
+      "latent": [
+        "458",
+        0
+      ]
+    },
+    "class_type": "LTXVImgToVideoInplace",
+    "_meta": {
+      "title": "LTXVImgToVideoInplace",
+      "cnr_id": "comfy-core",
+      "ver": "0.7.0"
+    }
+  },
+  "458": {
+    "inputs": {
+      "width": [
+        "473",
+        1
+      ],
+      "height": [
+        "473",
+        2
+      ],
+      "length": [
+        "442",
+        1
+      ],
+      "batch_size": 1
+    },
+    "class_type": "EmptyLTXVLatentVideo",
+    "_meta": {
+      "title": "Empty LTXV Latent Video",
+      "cnr_id": "comfy-core",
+      "ver": "0.3.60"
+    }
+  },
+  "459": {
+    "inputs": {
+      "value": "Using the provided start image as the exact visual reference, preserve the exact same man, facial features, skin tone, white hair, white kurta, studio background, acoustic panels, lighting setup, and overall cinematic composition throughout the entire video. The man recites the provided audio directly to the camera with high-precision, natural lip-sync. His mouth shapes, lips, and jaw movements precisely track every syllable, phoneme, and cadence of the speech. His facial expressions organically follow the meaning and emotion of the voice—including subtle expressions, responsive eye movements, and natural blinking.He maintains soft, engaging eye contact with the camera, shifting his gaze subtly and naturally as if emotionally immersed in the narration. The performance includes organic micro-movements such as natural breathing rhythm, slight head nods, and subtle weight shifts. Any hand or body movements remain minimal, graceful, and true to the initial pose without altering identity or clothing.Maintain absolute consistency in identity, clothing texture, and lighting setup.  Smooth, lifelike, and professional performance throughout."
+    },
+    "class_type": "PrimitiveStringMultiline",
+    "_meta": {
+      "title": "Text (Multiline)",
+      "cnr_id": "comfy-core",
+      "ver": "0.18.1"
+    }
+  },
+  "463": {
+    "inputs": {
+      "longer_edge": 1536,
+      "images": [
+        "473",
+        0
+      ]
+    },
+    "class_type": "ResizeImagesByLongerEdge",
+    "_meta": {
+      "title": "Resize Images by Longer Edge (DEPRECATED)",
+      "cnr_id": "comfy-core",
+      "ver": "0.5.1"
+    }
+  },
+  "464": {
+    "inputs": {
+      "strength": 1,
+      "bypass": false,
+      "vae": [
+        "496",
+        0
+      ],
+      "image": [
+        "465",
+        0
+      ],
+      "latent": [
+        "361",
+        0
+      ]
+    },
+    "class_type": "LTXVImgToVideoInplace",
+    "_meta": {
+      "title": "LTXVImgToVideoInplace",
+      "cnr_id": "comfy-core",
+      "ver": "0.7.0"
+    }
+  },
+  "465": {
+    "inputs": {
+      "img_compression": 33,
+      "image": [
+        "463",
+        0
+      ]
+    },
+    "class_type": "LTXVPreprocess",
+    "_meta": {
+      "title": "LTXV Preprocess",
+      "cnr_id": "comfy-core",
+      "ver": "0.7.0"
+    }
+  },
+  "473": {
+    "inputs": {
+      "width": 512,
+      "height": 512,
+      "upscale_method": "nearest-exact",
+      "keep_proportion": "resize",
+      "pad_color": "0, 0, 0",
+      "crop_position": "center",
+      "divisible_by": 32,
+      "device": "cpu",
+      "image": [
+        "269",
+        0
+      ]
+    },
+    "class_type": "ImageResizeKJv2",
+    "_meta": {
+      "title": "Resize Image v2",
+      "cnr_id": "comfyui-kjnodes",
+      "ver": "a9ab19d2a7933e03f72bc00103863f06b9483300"
+    }
+  },
+  "474": {
+    "inputs": {
+      "images": [
+        "473",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image",
+      "cnr_id": "comfy-core",
+      "ver": "0.18.1"
+    }
+  },
+  "482": {
+    "inputs": {
+      "unet_name": "ltx-2.3-22b-distilled-Q5_K_M.gguf",
+      "compute_device": "cuda:0",
+      "virtual_vram_gb": 7,
+      "donor_device": "cuda:1",
+      "expert_mode_allocations": "",
+      "eject_models": true
+    },
+    "class_type": "UnetLoaderGGUFDisTorch2MultiGPU",
+    "_meta": {
+      "title": "UnetLoaderGGUFDisTorch2MultiGPU",
+      "cnr_id": "ComfyUI-MultiGPU",
+      "aux_id": "pollockjj/ComfyUI-MultiGPU",
+      "ver": "1.1.10"
+    }
+  },
+  "485": {
+    "inputs": {
+      "unet_name": "ltx-2.3-22b-distilled_transformer_only_fp8_scaled.safetensors",
+      "weight_dtype": "default",
+      "compute_device": "cuda:0",
+      "virtual_vram_gb": 7,
+      "donor_device": "cuda:1",
+      "expert_mode_allocations": "",
+      "eject_models": true
+    },
+    "class_type": "UNETLoaderDisTorch2MultiGPU",
+    "_meta": {
+      "title": "UNETLoaderDisTorch2MultiGPU",
+      "cnr_id": "ComfyUI-MultiGPU",
+      "aux_id": "pollockjj/ComfyUI-MultiGPU",
+      "ver": "0.8.2"
+    }
+  },
+  "489": {
+    "inputs": {
+      "clip_name1": "gemma_3_12B_it_fp4_mixed.safetensors",
+      "clip_name2": "ltx-2.3_text_projection_bf16.safetensors",
+      "type": "ltxv",
+      "device": "cuda:1",
+      "virtual_vram_gb": 0,
+      "donor_device": "cpu",
+      "expert_mode_allocations": "",
+      "eject_models": false
+    },
+    "class_type": "DualCLIPLoaderDisTorch2MultiGPU",
+    "_meta": {
+      "title": "DualCLIPLoaderDisTorch2MultiGPU",
+      "cnr_id": "ComfyUI-MultiGPU",
+      "aux_id": "pollockjj/ComfyUI-MultiGPU",
+      "ver": "0.8.2"
+    }
+  },
+  "496": {
+    "inputs": {
+      "vae_name": "LTX23_video_vae_bf16.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE Video",
+      "cnr_id": "comfy-core",
+      "ver": "0.8.2"
+    }
+  },
+  "498": {
+    "inputs": {
+      "vae_name": "LTX23_audio_vae_bf16.safetensors",
+      "device": "main_device",
+      "weight_dtype": "bf16"
+    },
+    "class_type": "VAELoaderKJ",
+    "_meta": {
+      "title": "Load VAE Audio",
+      "cnr_id": "comfyui-kjnodes",
+      "ver": "487c7d86a0230aae3d8c0a37d517159b73834f85"
+    }
+  },
+  "499": {
+    "inputs": {
+      "source": [
+        "442",
+        1
+      ]
+    },
+    "class_type": "PreviewAny",
+    "_meta": {
+      "title": "Preview as Text",
+      "cnr_id": "comfy-core",
+      "ver": "0.18.1"
+    }
+  },
+  "500": {
+    "inputs": {
+      "audio": [
+        "383",
+        0
+      ]
+    },
+    "class_type": "PreviewAudio",
+    "_meta": {
+      "title": "Preview Audio",
+      "cnr_id": "comfy-core",
+      "ver": "0.18.1"
+    }
+  }
+}
