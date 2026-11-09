@@ -6,6 +6,7 @@ workflow IDs are registered independently on every worker.
 from __future__ import annotations
 
 import json
+import secrets
 import sqlite3
 import threading
 import time
@@ -391,30 +392,54 @@ def generate_ltx_api_video(
     destination.parent.mkdir(parents=True, exist_ok=True)
 
     if kind == "pose":
-        bindings = {"audio": _file_binding("506", "audio")}
+        # LTX-2.5 pose API workflow: LoadAudio 503, LoadVideo 506,
+        # optional start-image LoadImage 452, prompt 411, FPS 422, SaveVideo 453.
+        bindings = {"audio": _file_binding("503", "audio")}
         if video_file is not None:
             bindings["video"] = {
-                "node_id": "503", "input_name": "video", "upload_type": "input"
+                "node_id": "506", "input_name": "file", "upload_type": "input"
             }
         if image_file is not None:
             bindings["image"] = {
-                "node_id": "453", "input_name": "image", "upload_type": "image"
+                "node_id": "452", "input_name": "image", "upload_type": "image"
             }
-    else:
-        bindings = {
-            "audio": _file_binding("276", "audio"),
+        chosen_seed = int(seed)
+        if chosen_seed < 0:
+            chosen_seed = secrets.randbelow(2**32 - 1)
+        inputs = {
+            "422": {"value": int(max(1, min(60, int(fps))))},
+            "433": {"noise_seed": chosen_seed},
+            "442": {"noise_seed": chosen_seed + 1},
         }
+        if str(prompt or "").strip():
+            inputs["411"] = {"text": str(prompt).strip()}
+        if str(negative_prompt or "").strip():
+            inputs["419"] = {"text": str(negative_prompt).strip()}
+    else:
+        # F5PdfStudio LTX-2.3 API workflow node IDs.
+        bindings = {"audio": _file_binding("276", "audio")}
         if image_file is not None:
             bindings["image"] = {
                 "node_id": "269", "input_name": "image", "upload_type": "image"
             }
-
-    # StoryStudio worker API expects node-ID keyed input mappings.
-    inputs = {
-        "378": {"value": str(max(1.0, min(60.0, float(duration))))},
-        "379": {"value": int(max(1, min(60, int(fps))))},
-        "459": {"value": str(prompt or "").strip()},
-    }
+        chosen_seed = int(seed)
+        if chosen_seed < 0:
+            chosen_seed = secrets.randbelow(2**32 - 1)
+        positive_prompt = str(prompt or "").strip()
+        if str(extra_positive or "").strip():
+            positive_prompt = (positive_prompt + "\\n" + str(extra_positive).strip()).strip()
+        inputs = {
+            "340:319": {"value": positive_prompt},
+            "340:331": {"value": max(1.0, min(60.0, float(duration)))},
+            "340:323": {"value": int(max(1, min(60, int(fps))))},
+            "340:330": {"value": int(max(256, min(2048, int(width))))},
+            "340:324": {"value": int(max(256, min(2048, int(height))))},
+            "340:285": {"noise_seed": chosen_seed},
+            "340:286": {"noise_seed": chosen_seed + 1},
+            "341": {"filename_prefix": f"video/F5PdfStudio_LTX23_{int(time.time())}"},
+        }
+        if str(negative_prompt or "").strip():
+            inputs["340:314"] = {"text": str(negative_prompt).strip()}
     fields = {
         "workflow_id": worker["workflow_id"],
         "inputs": json.dumps(inputs, ensure_ascii=False),
@@ -486,8 +511,12 @@ def generate_ltx_api_video(
                         {"node_id": node_id, **(value if isinstance(value, dict) else {"value": value})}
                         for node_id, value in outputs.items()
                     ]
+                output_node_id = "453" if kind == "pose" else "341"
                 selected = next(
-                    (item for item in outputs if str(item.get("node_id") or item.get("node") or "") == "400"),
+                    (
+                        item for item in outputs
+                        if str(item.get("node_id") or item.get("node") or "") == output_node_id
+                    ),
                     None,
                 )
                 if selected is None and outputs:
