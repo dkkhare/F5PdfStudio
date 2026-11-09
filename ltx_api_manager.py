@@ -12,6 +12,7 @@ import time
 from contextlib import ExitStack, closing
 from pathlib import Path
 from typing import Any
+from urllib.parse import urljoin
 
 import requests
 
@@ -385,28 +386,29 @@ def generate_ltx_api_video(
     destination.parent.mkdir(parents=True, exist_ok=True)
 
     if kind == "pose":
-        bindings = {
-            "audio": _file_binding("506", "audio"),
-        }
+        bindings = {"audio": _file_binding("506", "audio")}
         if video_file is not None:
-            bindings["video"] = _file_binding("503", "video")
+            bindings["video"] = {
+                "node_id": "503", "input_name": "video", "upload_type": "input"
+            }
         if image_file is not None:
-            bindings["image"] = _file_binding("453", "image")
+            bindings["image"] = {
+                "node_id": "453", "input_name": "image", "upload_type": "image"
+            }
     else:
-        bindings = {"audio": _file_binding("276", "audio")}
+        bindings = {
+            "audio": _file_binding("276", "audio"),
+        }
         if image_file is not None:
-            bindings["image"] = _file_binding("269", "image")
+            bindings["image"] = {
+                "node_id": "269", "input_name": "image", "upload_type": "image"
+            }
 
+    # StoryStudio worker API expects node-ID keyed input mappings.
     inputs = {
-        "prompt": str(prompt or "").strip(),
-        "duration": str(max(1.0, min(60.0, float(duration)))),
-        "fps": int(max(1, min(60, int(fps)))),
-        "width": int(max(256, min(2048, int(width)))),
-        "height": int(max(256, min(2048, int(height)))),
-        "seed": int(seed),
-        "extra_positive": str(extra_positive or "").strip(),
-        "negative_prompt": str(negative_prompt or "").strip(),
-        "cfg": float(max(1.0, min(8.0, float(cfg or 1.0)))),
+        "378": {"value": str(max(1.0, min(60.0, float(duration))))},
+        "379": {"value": int(max(1, min(60, int(fps))))},
+        "459": {"value": str(prompt or "").strip()},
     }
     fields = {
         "workflow_id": worker["workflow_id"],
@@ -452,7 +454,8 @@ def generate_ltx_api_video(
                 f"{base}/jobs/{job_id}", headers=_headers(key), timeout=45
             )
             status_response.raise_for_status()
-            status_data = status_response.json()
+            status_payload = status_response.json()
+            status_data = status_payload.get("job") or status_payload
             last_status = str(status_data.get("status") or "unknown").lower()
             if on_status:
                 on_status(
@@ -465,8 +468,32 @@ def generate_ltx_api_video(
                     f"{status_data.get('error') or status_data.get('detail') or status_data}"
                 )
             if last_status in {"completed", "complete", "succeeded", "success"}:
+                outputs_response = requests.get(
+                    f"{base}/jobs/{job_id}/outputs",
+                    headers=_headers(key),
+                    timeout=60,
+                )
+                outputs_response.raise_for_status()
+                outputs_payload = outputs_response.json()
+                outputs = outputs_payload.get("outputs") or []
+                if isinstance(outputs, dict):
+                    outputs = [
+                        {"node_id": node_id, **(value if isinstance(value, dict) else {"value": value})}
+                        for node_id, value in outputs.items()
+                    ]
+                selected = next(
+                    (item for item in outputs if str(item.get("node_id") or item.get("node") or "") == "400"),
+                    None,
+                )
+                if selected is None and outputs:
+                    selected = outputs[0]
+                download_url = (
+                    selected.get("download_url") if isinstance(selected, dict) else None
+                )
+                if not download_url:
+                    download_url = f"{base}/jobs/{job_id}/download"
                 download_response = requests.get(
-                    f"{base}/jobs/{job_id}/download",
+                    urljoin(f"{base}/", str(download_url)),
                     headers=_headers(key),
                     timeout=300,
                 )
