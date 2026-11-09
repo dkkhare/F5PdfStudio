@@ -31,6 +31,7 @@ def _connect() -> sqlite3.Connection:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(str(DB_PATH), timeout=30, isolation_level=None)
     connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys=ON")
     connection.execute("PRAGMA journal_mode=WAL")
     connection.execute("PRAGMA busy_timeout=30000")
     return connection
@@ -156,7 +157,8 @@ def discover_workflows(directory: str | Path | None = None) -> list[dict[str, st
     """Return discovered workflow choices, using paths only internally."""
     result = []
     for path in _workflow_candidates(directory):
-        result.append({"name": path.name, "path": str(path)})
+        root = Path(os.getenv("LTX_WORKFLOW_DIR") or ROOT).expanduser().resolve()
+        result.append({"name": str(path.resolve().relative_to(root)), "path": str(path)})
     return result
 
 
@@ -165,7 +167,9 @@ def list_workflows() -> list[str]:
 
 
 def _register_one(base_url: str, api_key: str, path: str | Path) -> tuple[str, str, str, str]:
-    name, workflow = _load_workflow(path)
+    _, workflow = _load_workflow(path)
+    workflow_root = Path(os.getenv("LTX_WORKFLOW_DIR") or ROOT).expanduser().resolve()
+    name = str(Path(path).resolve().relative_to(workflow_root))
     raw = Path(path).read_bytes()
     import hashlib
     fingerprint = hashlib.sha256(raw).hexdigest()
@@ -301,6 +305,7 @@ def workers_markdown() -> str:
 def remove_worker(worker_id: int) -> str:
     init_worker_db()
     with _worker_db_lock, closing(_connect()) as db:
+        db.execute("DELETE FROM ltx_api_worker_workflows WHERE worker_id = ?", (int(worker_id),))
         cursor = db.execute("DELETE FROM ltx_api_workers WHERE id = ?", (int(worker_id),))
         if cursor.rowcount:
             return f"Removed LTX API worker {worker_id} from the database."
@@ -353,6 +358,7 @@ def check_workers() -> str:
                         continue
                     failures = int(current["consecutive_failures"] or 0) + 1
                     if failures >= HEALTH_FAILURE_LIMIT:
+                        db.execute("DELETE FROM ltx_api_worker_workflows WHERE worker_id=?", (worker_id,))
                         db.execute("DELETE FROM ltx_api_workers WHERE id=?", (worker_id,))
                         messages.append(
                             f"Worker {worker_id}: removed after {failures} failed health checks ({type(exc).__name__})."
@@ -519,7 +525,7 @@ def _workflow_job_payload(
         if "loadimage" in lower_cls and image_path is not None:
             field = next((x for x in node_inputs if str(x).lower() in {"image", "file", "path"}), None)
             if field:
-                bindings.setdefault("image", _file_binding(node_id, str(field)))
+                bindings.setdefault("image", {"node_id": node_id, "input_name": str(field), "upload_type": "image"})
         elif "loadaudio" in lower_cls:
             field = next((x for x in node_inputs if str(x).lower() in {"audio", "file", "path"}), None)
             if field:
@@ -561,6 +567,24 @@ def _workflow_job_payload(
             output_node_id = node_id
             if "filename_prefix" in node_inputs:
                 override["filename_prefix"] = f"video/F5PdfStudio_{secrets.token_hex(5)}"
+        # Primitive widget nodes may hold the value that is connected to a downstream setting.
+        if "primitive" in lower_cls and "value" in node_inputs:
+            for _target_id, target_field in downstream.get(node_id, []):
+                key = target_field.lower()
+                if key in {"width", "video_width"}:
+                    override["value"] = int(width)
+                elif key in {"height", "video_height"}:
+                    override["value"] = int(height)
+                elif key in {"fps", "frame_rate", "framerate"}:
+                    override["value"] = int(fps)
+                elif key in {"duration", "seconds", "video_duration"}:
+                    override["value"] = float(duration)
+                elif key in {"length", "num_frames", "frame_count"}:
+                    override["value"] = max(1, int(round(float(duration) * int(fps))))
+                elif key in {"cfg", "video_cfg", "audio_cfg"}:
+                    override["value"] = float(cfg)
+                elif key in {"seed", "noise_seed"}:
+                    override["value"] = int(seed)
         if override:
             inputs[node_id] = override
 
