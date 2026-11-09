@@ -44,14 +44,27 @@ def init_worker_db() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 base_url TEXT NOT NULL UNIQUE,
                 api_key TEXT NOT NULL,
-                ltx23_workflow_id TEXT NOT NULL,
-                ltx25_pose_workflow_id TEXT NOT NULL,
+                ltx23_workflow_id TEXT NOT NULL DEFAULT '',
+                ltx25_pose_workflow_id TEXT NOT NULL DEFAULT '',
                 status TEXT NOT NULL DEFAULT 'FREE',
                 current_job_id TEXT,
                 consecutive_failures INTEGER NOT NULL DEFAULT 0,
                 last_health_check TEXT,
                 last_used REAL NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ltx_api_worker_workflows (
+                worker_id INTEGER NOT NULL,
+                workflow_name TEXT NOT NULL,
+                workflow_id TEXT NOT NULL,
+                workflow_path TEXT NOT NULL,
+                workflow_hash TEXT NOT NULL,
+                PRIMARY KEY (worker_id, workflow_name),
+                FOREIGN KEY(worker_id) REFERENCES ltx_api_workers(id) ON DELETE CASCADE
             )
             """
         )
@@ -115,18 +128,79 @@ def _register_one(base_url: str, api_key: str, path: str | Path) -> str:
     return workflow_id
 
 
-def register_worker(
-    base_url: str,
-    api_key: str,
-    ltx23_workflow_path: str | Path,
-    ltx25_pose_workflow_path: str | Path,
-) -> str:
-    """Health-check a server, register both workflows, then persist its credentials."""
+def _workflow_candidates(directory: str | Path | None = None) -> list[Path]:
+    """Find every valid ComfyUI API prompt-graph JSON without assuming filenames."""
+    root = Path(directory or os.getenv("LTX_WORKFLOW_DIR") or ROOT).expanduser().resolve()
+    if not root.is_dir():
+        raise FileNotFoundError(f"Workflow directory does not exist: {root}")
+    excluded = {".git", ".venv", "venv", "__pycache__", "data", "outputs", "input", "temp", "models"}
+    found: list[Path] = []
+    for path in root.rglob("*.json"):
+        try:
+            relative = path.relative_to(root)
+            if any(part.startswith(".") or part.lower() in excluded for part in relative.parts):
+                continue
+            _, graph = _load_workflow(path)
+            if graph and all(
+                isinstance(node, dict) and isinstance(node.get("class_type"), str)
+                and isinstance(node.get("inputs"), dict)
+                for node in graph.values()
+            ):
+                found.append(path)
+        except Exception:
+            continue
+    return sorted(found, key=lambda item: (item.name.lower(), str(item).lower()))
+
+
+def discover_workflows(directory: str | Path | None = None) -> list[dict[str, str]]:
+    """Return discovered workflow choices, using paths only internally."""
+    result = []
+    for path in _workflow_candidates(directory):
+        result.append({"name": path.name, "path": str(path)})
+    return result
+
+
+def list_workflows() -> list[str]:
+    return [item["name"] for item in discover_workflows()]
+
+
+def _register_one(base_url: str, api_key: str, path: str | Path) -> tuple[str, str, str, str]:
+    name, workflow = _load_workflow(path)
+    raw = Path(path).read_bytes()
+    import hashlib
+    fingerprint = hashlib.sha256(raw).hexdigest()
+    response = requests.post(
+        f"{base_url}/workflows/register",
+        headers={**_headers(api_key), "Content-Type": "application/json"},
+        json={"name": name, "workflow": workflow},
+        timeout=120,
+    )
+    if not response.ok:
+        raise RuntimeError(
+            f"Workflow registration failed for {name} (HTTP {response.status_code}): "
+            f"{response.text[:2000]}"
+        )
+    body = response.json()
+    workflow_id = str(body.get("workflow_id") or "").strip()
+    if not body.get("success", True) or not workflow_id:
+        raise RuntimeError(f"Worker did not return a valid workflow_id for {name}: {body}")
+    return name, workflow_id, str(Path(path).resolve()), fingerprint
+
+
+def register_worker(base_url: str, api_key: str, *unused_workflow_paths: str | Path) -> str:
+    """Register every valid workflow JSON discovered in the workflow directory."""
     init_worker_db()
     base = _normalise_url(base_url)
     key = str(api_key or "").strip()
     if not key:
         raise ValueError("Enter the API key for this LTX API worker.")
+    candidates = _workflow_candidates()
+    if not candidates:
+        folder = os.getenv("LTX_WORKFLOW_DIR") or str(ROOT)
+        raise FileNotFoundError(
+            f"No valid ComfyUI API workflow JSON files were found under {folder}. "
+            "Set LTX_WORKFLOW_DIR to the folder containing your workflow JSON files."
+        )
 
     with _worker_db_lock, closing(_connect()) as db:
         existing = db.execute(
@@ -139,8 +213,8 @@ def register_worker(
     health = requests.get(f"{base}/health", headers=_headers(key), timeout=HEALTH_TIMEOUT)
     _assert_healthy(health)
 
-    ltx23_id = _register_one(base, key, ltx23_workflow_path)
-    pose_id = _register_one(base, key, ltx25_pose_workflow_path)
+    registered = [_register_one(base, key, path) for path in candidates]
+    first_id = registered[0][1]
 
     with _worker_db_lock:
         db = _connect()
@@ -166,18 +240,28 @@ def register_worker(
                     status=CASE WHEN ltx_api_workers.status='BUSY' THEN 'BUSY' ELSE 'FREE' END,
                     consecutive_failures=0, last_health_check=CURRENT_TIMESTAMP
                 """,
-                (base, key, ltx23_id, pose_id),
+                (base, key, first_id, first_id),
+            )
+            worker = db.execute(
+                "SELECT id FROM ltx_api_workers WHERE base_url=?", (base,)
+            ).fetchone()
+            worker_id = int(worker["id"])
+            db.execute("DELETE FROM ltx_api_worker_workflows WHERE worker_id=?", (worker_id,))
+            db.executemany(
+                """
+                INSERT INTO ltx_api_worker_workflows
+                    (worker_id, workflow_name, workflow_id, workflow_path, workflow_hash)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                [(worker_id, name, workflow_id, path, fingerprint)
+                 for name, workflow_id, path, fingerprint in registered],
             )
             db.commit()
         finally:
             db.close()
 
-    return (
-        f"Registered LTX API worker: {base}\n"
-        f"LTX-2.3 workflow ID: {ltx23_id}\n"
-        f"LTX-2.5 Pose workflow ID: {pose_id}"
-    )
-
+    names = "\n".join(f"  • {name} → {workflow_id}" for name, workflow_id, _, _ in registered)
+    return f"Registered LTX API worker: {base}\nDiscovered and registered {len(registered)} workflow(s):\n{names}"
 
 def list_workers() -> list[dict[str, Any]]:
     init_worker_db()
@@ -290,43 +374,37 @@ def check_workers() -> str:
     return "\n".join(messages) if messages else "No LTX API workers are registered."
 
 
-def _reserve_worker(workflow_kind: str) -> dict[str, Any] | None:
-    workflow_column = (
-        "ltx25_pose_workflow_id" if workflow_kind == "pose" else "ltx23_workflow_id"
-    )
+def _reserve_worker(workflow_name: str) -> dict[str, Any] | None:
     init_worker_db()
     with _worker_db_lock:
         db = _connect()
         try:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute(
-                f"""
-                SELECT * FROM ltx_api_workers
-                WHERE status='FREE' AND {workflow_column} IS NOT NULL
-                  AND {workflow_column} <> ''
-                ORDER BY last_used ASC, id ASC LIMIT 1
                 """
+                SELECT w.*, ww.workflow_id, ww.workflow_path, ww.workflow_hash
+                FROM ltx_api_workers AS w
+                JOIN ltx_api_worker_workflows AS ww ON ww.worker_id=w.id
+                WHERE w.status='FREE' AND ww.workflow_name=?
+                ORDER BY w.last_used ASC, w.id ASC LIMIT 1
+                """,
+                (str(workflow_name),),
             ).fetchone()
             if not row:
                 db.rollback()
                 return None
             cursor = db.execute(
-                """
-                UPDATE ltx_api_workers SET status='BUSY', current_job_id=NULL, last_used=?
-                WHERE id=? AND status='FREE'
-                """,
+                "UPDATE ltx_api_workers SET status='BUSY', current_job_id=NULL, last_used=? WHERE id=? AND status='FREE'",
                 (time.time(), row["id"]),
             )
             if cursor.rowcount != 1:
                 db.rollback()
                 return None
             result = dict(row)
-            result["workflow_id"] = result[workflow_column]
             db.commit()
             return result
         finally:
             db.close()
-
 
 def _set_job(worker_id: int, job_id: str) -> None:
     with _worker_db_lock, closing(_connect()) as db:
