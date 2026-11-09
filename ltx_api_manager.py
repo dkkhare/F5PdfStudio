@@ -609,10 +609,6 @@ def _workflow_job_payload(
 
     if audio_path and "audio" not in bindings:
         raise ValueError("The selected workflow has no detectable audio loader node.")
-    if image_path and "image" not in bindings:
-        raise ValueError("An image was supplied, but the selected workflow has no detectable image loader node.")
-    if video_path and "video" not in bindings:
-        raise ValueError("A reference video was supplied, but the selected workflow has no detectable video loader node.")
     return inputs, bindings, output_node_id
 
 def generate_ltx_api_video(
