@@ -172,8 +172,8 @@ def workers_markdown() -> str:
     if not workers:
         return "No LTX API workers registered yet."
     lines = [
-        "| ID | LTX API URL | Status | Current job | Failed health checks |",
-        "|---:|---|---|---|---:|",
+        "| ID | LTX API URL | Status | Current job | Failed checks | LTX-2.3 workflow ID | LTX-2.5 Pose workflow ID |",
+        "|---:|---|---|---|---:|---|---|",
     ]
     for worker in workers:
         url = worker["base_url"].replace("|", "%7C")
