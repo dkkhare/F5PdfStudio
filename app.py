@@ -2888,6 +2888,7 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
             "When all sections are finished they are combined into clips of at most the length below; a section is never cut."
         )
         video_engine = gr.Dropdown(choices=[("SadTalker — local", "sadtalker"), ("Wan2.2 — Colab", "wan2.2"), ("LTX-2.5 — Colab", "ltx2.5"), ("LTX-2.3 / LTX-2.5 Pose — LTX API worker pool", "ltx2.3")], value="sadtalker", label="Video engine")
+        ltx_workers_timer = gr.Timer(30) if hasattr(gr, "Timer") else None
         poet_image = gr.Image(label="Portrait / character image", type="filepath", sources=["upload"])
         with gr.Row():
             burn_subtitles = gr.Checkbox(value=True, label="Burn the section text on every video")
@@ -3004,7 +3005,6 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
                 elem_classes=["status-output"],
             )
             ltx_workers_table = gr.Markdown(ltx_workers_markdown())
-            ltx_workers_timer = gr.Timer(30) if hasattr(gr, "Timer") else None
             with gr.Row():
                 ltx23_duration = gr.Slider(2, 60, value=20, step=1, label="Maximum seconds per render (longer section audio is cut at pauses, rendered in pieces and joined)")
                 ltx23_fps = gr.Dropdown(choices=[16, 20, 24, 25, 30], value=24, label="FPS")
