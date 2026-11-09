@@ -2419,7 +2419,7 @@ def start_remote_ltx23_video_generation(
     burn_text=True, output_resolution="1920x1080", subtitle_font="Nirmala UI", subtitle_font_size=28,
     max_clip_minutes=10.0,
 ):
-    """LTX ComfyUI workflows on Colab, section by section.
+    """Registered LTX API workflows on the shared worker pool, section by section.
 
     ltx23_workflow == "image": LTX-2.3 image + audio.
     ltx23_workflow == "pose":  LTX-2.5 audio + reference video (head/hand/body motion from the video).
@@ -2431,8 +2431,11 @@ def start_remote_ltx23_video_generation(
         raise gr.Error("Open/create the project with Book name and Part number first.")
     use_pose = str(ltx23_workflow or "image") == "pose"
     has_ref_video = bool(ltx23_ref_video) and Path(str(ltx23_ref_video)).is_file()
-    if use_pose and ltx23_ref_video and not has_ref_video:
-        raise gr.Error("The reference video upload could not be found. Upload it again.")
+    if use_pose and not has_ref_video:
+        raise gr.Error(
+            "Upload the LTX-2.5 pose reference video. With multiple workers, the reference video "
+            "must be sent with each job rather than relying on another server's previous upload."
+        )
 
     _msg, project_dir_text = open_or_create_project(project_name, book_name, part_number, author_name)
     project_dir = Path(project_dir_text)
@@ -2523,7 +2526,7 @@ def start_remote_ltx23_video_generation(
         pipeline.generate_in_pieces(render, destination, Path(source), max_piece, destination.parent, destination.stem)
 
     engine_name = "ltx25_pose" if use_pose else "ltx2.3"
-    label = "LTX-2.5 pose (ComfyUI / Colab)" if use_pose else "LTX-2.3 (ComfyUI / Colab)"
+    label = "LTX-2.5 pose (LTX API worker pool)" if use_pose else "LTX-2.3 (LTX API worker pool)"
 
     def runner(notify):
         return _remote_video_sections(
