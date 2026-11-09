@@ -406,10 +406,24 @@ def generate_ltx_api_video(
         chosen_seed = int(seed)
         if chosen_seed < 0:
             chosen_seed = secrets.randbelow(2**32 - 1)
+        ratio = float(width) / max(1.0, float(height))
+        aspect_ratio = "16:9 (Widescreen)" if abs(ratio - 16 / 9) < 0.08 else (
+            "9:16 (Portrait)" if ratio < 1 else "4:3"
+        )
+        megapixels = max(0.3, min(2.0, (int(width) * int(height)) / 1_000_000))
         inputs = {
             "422": {"value": int(max(1, min(60, int(fps))))},
             "433": {"noise_seed": chosen_seed},
             "442": {"noise_seed": chosen_seed + 1},
+            "435": {
+                "video_cfg": float(max(1.0, min(8.0, float(cfg or 1.0)))),
+                "audio_cfg": float(max(1.0, min(8.0, float(cfg or 1.0)))),
+            },
+            "474": {
+                "aspect_ratio": aspect_ratio,
+                "megapixels": megapixels,
+                "multiple": 128,
+            },
         }
         if str(prompt or "").strip():
             inputs["411"] = {"text": str(prompt).strip()}
@@ -436,6 +450,8 @@ def generate_ltx_api_video(
             "340:324": {"value": int(max(256, min(2048, int(height))))},
             "340:285": {"noise_seed": chosen_seed},
             "340:286": {"noise_seed": chosen_seed + 1},
+            "340:290": {"cfg": float(max(1.0, min(8.0, float(cfg or 1.0))))},
+            "340:315": {"cfg": float(max(1.0, min(8.0, float(cfg or 1.0))))},
             "341": {"filename_prefix": f"video/F5PdfStudio_LTX23_{int(time.time())}"},
         }
         if str(negative_prompt or "").strip():
