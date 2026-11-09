@@ -2966,12 +2966,9 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
 
         with gr.Group(visible=False) as ltx23_video_group:
             gr.Markdown(
-                "## LTX API — LTX-2.3 / LTX-2.5 Pose\n"
-                "The audio of every section is taken from the project's audio folder automatically (generate it in Tab 4 first). "
-                "A reference image is optional and is uploaded to the selected worker for each job.\n\n"
-                "**LTX-2.5 pose workflow:** upload a reference video; its head, hand and body motion guide generation. "
-                "By default the reference image is the start frame (your person and studio); untick the box to start "
-                "from the reference video's first frame. The reference must be 24 fps and at least as long as the longest render."
+                "## LTX API — Dynamic ComfyUI workflow pool\n"
+                "The audio of each section is taken from the project's audio folder automatically (generate it in Tab 4 first). "
+                "A reference image and reference video are optional. The selected JSON workflow determines which inputs are used."
             )
             gr.Markdown(
                 "### LTX API worker registration\n"
@@ -3010,11 +3007,11 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
                 allow_custom_value=False,
             )
             ltx23_ref_video = gr.Video(
-                label="Reference video for LTX-2.5 pose (24 fps, at least as long as the clip duration)",
+                label="Optional reference video (used only if the selected workflow has a video loader)",
                 sources=["upload"],
             )
             ltx23_prompt = gr.Textbox(
-                label="LTX-2.3 prompt (optional; blank uses each text section)",
+                label="Positive prompt (optional; blank uses each text section)",
                 lines=5,
                 placeholder="Describe the motion and scene; leave blank to include the current Hindi text section.",
             )
@@ -3039,7 +3036,7 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
                 label="Negative prompt strength (CFG, first stage). 1.0 = negative prompt OFF (fastest); raise to 1.5-3 to use it (slower)",
             )
             ltx23_image = gr.Image(
-                label="Optional reference image (reused by the Colab bridge when omitted later)",
+                label="Optional reference image (uploaded when the selected workflow has an image loader)",
                 type="filepath",
                 sources=["upload"],
             )
@@ -3158,7 +3155,7 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
     refresh_ltx_workers_button.click(
         fn=refresh_ltx_workers_from_ui,
         inputs=[],
-        outputs=[ltx_worker_action_status, ltx_workers_table],
+        outputs=[ltx_worker_action_status, ltx_workers_table, ltx23_workflow],
     )
     remove_ltx_worker_button.click(
         fn=remove_ltx_worker_from_ui,
@@ -3169,7 +3166,7 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
         ltx_workers_timer.tick(
             fn=refresh_ltx_workers_from_ui,
             inputs=[],
-            outputs=[ltx_worker_action_status, ltx_workers_table],
+            outputs=[ltx_worker_action_status, ltx_workers_table, ltx23_workflow],
             show_progress="hidden",
         )
     generate_ltx23_button.click(
