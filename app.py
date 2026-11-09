@@ -99,9 +99,18 @@ from remote_colab_service import (
 
 from ltx23_comfyui_service import (
     DEFAULT_LTX23_BRIDGE_URL,
+    DEFAULT_WORKFLOW_PATH,
     DEFAULT_POSE_WORKFLOW_PATH,
     check_ltx23_bridge,
     generate_ltx23_video,
+)
+
+from ltx_api_manager import (
+    register_worker as register_ltx_api_worker,
+    workers_markdown as ltx_workers_markdown,
+    check_workers as check_ltx_api_workers,
+    remove_worker as remove_ltx_api_worker,
+    generate_ltx_api_video,
 )
 
 
@@ -2376,16 +2385,37 @@ def start_remote_ltx_video_generation(
     yield from _live_video_job('LTX 2.5 (Colab)', runner, finalize)
 
 
-def check_ltx23_from_ui(bridge_url, bridge_token):
-    ok, message = check_ltx23_bridge(bridge_url or DEFAULT_LTX23_BRIDGE_URL, bridge_token or "")
-    if not ok:
-        return message
-    return message
+def register_ltx_worker_from_ui(api_url, api_key, ltx23_workflow_path, pose_workflow_path):
+    try:
+        message = register_ltx_api_worker(
+            api_url, api_key, ltx23_workflow_path, pose_workflow_path
+        )
+        return message, ltx_workers_markdown()
+    except Exception as exc:
+        return f"LTX API workflow registration failed: {type(exc).__name__}: {exc}", ltx_workers_markdown()
+
+
+def refresh_ltx_workers_from_ui():
+    try:
+        message = check_ltx_api_workers()
+    except Exception as exc:
+        message = f"LTX API health check failed: {type(exc).__name__}: {exc}"
+    return message, ltx_workers_markdown()
+
+
+def remove_ltx_worker_from_ui(worker_id):
+    try:
+        if worker_id is None or not str(worker_id).strip():
+            raise ValueError("Enter the worker ID to remove.")
+        message = remove_ltx_api_worker(int(worker_id))
+        return message, ltx_workers_markdown()
+    except Exception as exc:
+        return f"Could not remove worker: {exc}", ltx_workers_markdown()
 
 
 def start_remote_ltx23_video_generation(
     corrected_text, project_name, book_name, author_name, part_number,
-    poet_image, ltx23_image, bridge_url, bridge_token, ltx23_prompt, ltx23_duration,
+    poet_image, ltx23_image, ltx23_prompt, ltx23_duration,
     ltx23_fps, ltx23_width, ltx23_height, ltx23_seed, ltx23_audio,
     ltx23_ref_video=None, ltx23_workflow="image",
     ltx23_extra_positive="", ltx23_extra_negative="", ltx23_cfg=1.0, ltx23_pose_use_image=True,
@@ -2402,8 +2432,6 @@ def start_remote_ltx23_video_generation(
         raise gr.Error("Enter the project name first.")
     if not str(book_name or "").strip() or not str(part_number or "").strip():
         raise gr.Error("Open/create the project with Book name and Part number first.")
-    if not str(bridge_url or DEFAULT_LTX23_BRIDGE_URL).strip():
-        raise gr.Error("Enter the public URL for the LTX Colab bridge (port 8190).")
     use_pose = str(ltx23_workflow or "image") == "pose"
     has_ref_video = bool(ltx23_ref_video) and Path(str(ltx23_ref_video)).is_file()
     if use_pose and ltx23_ref_video and not has_ref_video:
@@ -2457,7 +2485,6 @@ def start_remote_ltx23_video_generation(
         "prompt": str(ltx23_prompt or ""),
         "image": image_copy,
         "manual_audio_sha256": _file_sha(manual_audio_copy),
-        "bridge_url": str(bridge_url or DEFAULT_LTX23_BRIDGE_URL),
     }
     base_prompt = str(ltx23_prompt or "").strip()
     reference = {"video": ref_video_copy or None}
@@ -2477,22 +2504,23 @@ def start_remote_ltx23_video_generation(
                     "with natural facial movement and accurate lip synchronization. Context: "
                     + str(section_text)[:3000]
                 )
-            pose_kwargs = (
-                {"workflow_path": DEFAULT_POSE_WORKFLOW_PATH, "reference_video_path": reference["video"]}
-                if use_pose else {}
-            )
-            output = generate_ltx23_video(
-                prompt=prompt, output_path=out, image_path=image_copy or None, audio_path=piece_audio, **pose_kwargs,
-                base_url=bridge_url or DEFAULT_LTX23_BRIDGE_URL, api_key=bridge_token or "",
-                duration=float(max(1, min(60, math.ceil(seconds)))), fps=int(ltx23_fps or 24),
-                width=int(ltx23_width or 1280), height=int(ltx23_height or 720),
+            output = generate_ltx_api_video(
+                workflow_kind="pose" if use_pose else "image",
+                prompt=prompt,
+                output_path=out,
+                image_path=image_copy or None,
+                audio_path=piece_audio,
+                reference_video_path=reference["video"] if use_pose else None,
+                duration=float(max(1, min(60, math.ceil(seconds)))),
+                fps=int(ltx23_fps or 24),
+                width=int(ltx23_width or 1280),
+                height=int(ltx23_height or 720),
                 seed=int(ltx23_seed if ltx23_seed is not None else -1),
                 extra_positive=str(ltx23_extra_positive or "").strip(),
                 negative_prompt=str(ltx23_extra_negative or "").strip(),
-                cfg=float(ltx23_cfg or 1.0), timeout=3600,
+                cfg=float(ltx23_cfg or 1.0),
+                timeout=3600,
             )
-            if use_pose:
-                reference["video"] = None  # the bridge keeps the last reference video: upload it only once
             return output
 
         pipeline.generate_in_pieces(render, destination, Path(source), max_piece, destination.parent, destination.stem)
@@ -2946,16 +2974,37 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
                 "untick the box to start from the reference video's first frame. The reference must be 24 fps and at least "
                 "as long as the longest render."
             )
-            ltx23_bridge_url = gr.Textbox(
-                value=DEFAULT_LTX23_BRIDGE_URL,
-                label="LTX-2.3 Colab bridge public URL (port 8190)",
-                placeholder="https://your-public-tunnel.example",
+            gr.Markdown(
+                "### LTX API worker registration\n"
+                "Register up to five independent servers. Each server stores its API URL, API key, "
+                "and its registered LTX-2.3 and LTX-2.5 Pose workflow IDs in the local database. "
+                "Generation is sent to the next FREE worker; up to five workers can run at once."
             )
-            ltx23_bridge_token = gr.Textbox(
-                value=os.getenv("F5PDFSTUDIO_LTX23_API_KEY", ""),
-                label="Optional bridge API key",
-                type="password",
+            with gr.Row():
+                ltx_api_url = gr.Textbox(label="LTX API URL", placeholder="https://your-kaggle-or-colab-tunnel")
+                ltx_api_key = gr.Textbox(label="LTX API Key", type="password")
+            with gr.Row():
+                ltx23_workflow_file = gr.Textbox(
+                    value=str(DEFAULT_WORKFLOW_PATH),
+                    label="LTX-2.3 API workflow JSON path",
+                )
+                ltx25_pose_workflow_file = gr.Textbox(
+                    value=str(DEFAULT_POSE_WORKFLOW_PATH),
+                    label="LTX-2.5 Pose API workflow JSON path",
+                )
+            with gr.Row():
+                register_ltx_worker_button = gr.Button("Register LTX API worker", variant="primary")
+                refresh_ltx_workers_button = gr.Button("Check all workers / Refresh")
+            with gr.Row():
+                ltx_remove_worker_id = gr.Number(value=None, precision=0, label="Worker ID to remove")
+                remove_ltx_worker_button = gr.Button("Remove worker")
+            ltx_worker_action_status = gr.Textbox(
+                label="LTX API worker manager",
+                lines=4,
+                interactive=False,
+                elem_classes=["status-output"],
             )
+            ltx_workers_table = gr.Markdown("No LTX API workers registered yet.")
             with gr.Row():
                 ltx23_duration = gr.Slider(2, 60, value=20, step=1, label="Maximum seconds per render (longer section audio is cut at pauses, rendered in pieces and joined)")
                 ltx23_fps = gr.Dropdown(choices=[16, 20, 24, 25, 30], value=24, label="FPS")
@@ -3007,8 +3056,7 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
                 sources=["upload"],
             )
             with gr.Row():
-                check_ltx23_bridge_button = gr.Button("Check LTX-2.3 ComfyUI bridge")
-                generate_ltx23_button = gr.Button("Generate / Resume LTX-2.3", variant="primary")
+                generate_ltx23_button = gr.Button("Generate / Resume LTX video", variant="primary")
             ltx23_status = gr.Textbox(label="LTX-2.3 status", lines=8, interactive=False, elem_classes=["status-output"])
             ltx23_preview = gr.Video(label="LTX-2.3 result")
             ltx23_download = gr.File(label="Download combined clips / section videos", file_count="multiple")
@@ -3109,24 +3157,34 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
 
     generate_wan_button.click(fn=start_remote_wan_video_generation, inputs=[extracted_text, project_name, book_name, author_name, part_number, poet_image, video_colab_url, video_colab_token, wan_task, wan_checkpoint, wan_prompt, wan_size, wan_frame_num, wan_steps, wan_seed, wan_audio_section, burn_subtitles, output_resolution, subtitle_font, subtitle_font_size, max_clip_minutes], outputs=[wan_status, wan_preview, wan_download], concurrency_limit=1, concurrency_id="video_generation")
     generate_ltx_button.click(fn=start_remote_ltx_video_generation, inputs=[extracted_text, project_name, book_name, author_name, part_number, poet_image, video_colab_url, video_colab_token, ltx_mode, ltx_prompt, ltx_duration, ltx_fps, ltx_audio, burn_subtitles, output_resolution, subtitle_font, subtitle_font_size, max_clip_minutes], outputs=[ltx_status, ltx_preview, ltx_download], concurrency_limit=1, concurrency_id="video_generation")
-    check_ltx23_bridge_button.click(
-        fn=check_ltx23_from_ui,
-        inputs=[ltx23_bridge_url, ltx23_bridge_token],
-        outputs=ltx23_status,
+    register_ltx_worker_button.click(
+        fn=register_ltx_worker_from_ui,
+        inputs=[ltx_api_url, ltx_api_key, ltx23_workflow_file, ltx25_pose_workflow_file],
+        outputs=[ltx_worker_action_status, ltx_workers_table],
+    )
+    refresh_ltx_workers_button.click(
+        fn=refresh_ltx_workers_from_ui,
+        inputs=[],
+        outputs=[ltx_worker_action_status, ltx_workers_table],
+    )
+    remove_ltx_worker_button.click(
+        fn=remove_ltx_worker_from_ui,
+        inputs=ltx_remove_worker_id,
+        outputs=[ltx_worker_action_status, ltx_workers_table],
     )
     generate_ltx23_button.click(
         fn=start_remote_ltx23_video_generation,
         inputs=[
             extracted_text, project_name, book_name, author_name, part_number,
-            poet_image, ltx23_image, ltx23_bridge_url, ltx23_bridge_token, ltx23_prompt,
+            poet_image, ltx23_image, ltx23_prompt,
             ltx23_duration, ltx23_fps, ltx23_width, ltx23_height, ltx23_seed,
             ltx23_audio, ltx23_ref_video, ltx23_workflow,
             ltx23_extra_positive, ltx23_extra_negative, ltx23_cfg, ltx23_pose_use_image,
             burn_subtitles, output_resolution, subtitle_font, subtitle_font_size, max_clip_minutes,
         ],
         outputs=[ltx23_status, ltx23_preview, ltx23_download],
-        concurrency_limit=1,
-        concurrency_id="video_generation",
+        concurrency_limit=5,
+        concurrency_id="ltx_api_generation",
     )
 
     def _create_gemini_voice_ui(reference_audio_path, consent_audio_path, api_key):
