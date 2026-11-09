@@ -247,7 +247,7 @@ def check_workers() -> str:
                     """
                     UPDATE ltx_api_workers
                     SET consecutive_failures=0,
-                        status=CASE WHEN status='BUSY' THEN 'BUSY' ELSE 'FREE' END,
+                        status=CASE WHEN current_job_id IS NOT NULL THEN 'BUSY' ELSE 'FREE' END,
                         last_health_check=CURRENT_TIMESTAMP
                     WHERE id=?
                     """,
@@ -312,7 +312,7 @@ def _reserve_worker(workflow_kind: str) -> dict[str, Any] | None:
                 return None
             cursor = db.execute(
                 """
-                UPDATE ltx_api_workers SET status='BUSY', last_used=?
+                UPDATE ltx_api_workers SET status='BUSY', current_job_id=NULL, last_used=?
                 WHERE id=? AND status='FREE'
                 """,
                 (time.time(), row["id"]),
