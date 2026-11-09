@@ -2382,14 +2382,16 @@ def start_remote_ltx_video_generation(
     yield from _live_video_job('LTX 2.5 (Colab)', runner, finalize)
 
 
-def register_ltx_worker_from_ui(api_url, api_key, ltx23_workflow_path, pose_workflow_path):
+def register_ltx_worker_from_ui(api_url, api_key):
     try:
-        message = register_ltx_api_worker(
-            api_url, api_key, ltx23_workflow_path, pose_workflow_path
-        )
-        return message, ltx_workers_markdown()
+        message = register_ltx_api_worker(api_url, api_key)
     except Exception as exc:
-        return f"LTX API workflow registration failed: {type(exc).__name__}: {exc}", ltx_workers_markdown()
+        message = f"LTX API workflow registration failed: {type(exc).__name__}: {exc}"
+    choices = list_ltx_api_workflows()
+    return message, ltx_workers_markdown(), gr.Dropdown(
+        choices=choices, value=(choices or [None])[0],
+        label="Workflow JSON (auto-discovered)",
+    )
 
 
 def refresh_ltx_workers_from_ui():
@@ -2397,8 +2399,11 @@ def refresh_ltx_workers_from_ui():
         message = check_ltx_api_workers()
     except Exception as exc:
         message = f"LTX API health check failed: {type(exc).__name__}: {exc}"
-    return message, ltx_workers_markdown()
-
+    choices = list_ltx_api_workflows()
+    return message, ltx_workers_markdown(), gr.Dropdown(
+        choices=choices, value=(choices or [None])[0],
+        label="Workflow JSON (auto-discovered)",
+    )
 
 def remove_ltx_worker_from_ui(worker_id):
     try:
@@ -2429,13 +2434,10 @@ def start_remote_ltx23_video_generation(
         raise gr.Error("Enter the project name first.")
     if not str(book_name or "").strip() or not str(part_number or "").strip():
         raise gr.Error("Open/create the project with Book name and Part number first.")
-    use_pose = str(ltx23_workflow or "image") == "pose"
+    workflow_name = str(ltx23_workflow or "").strip()
+    if not workflow_name:
+        raise gr.Error("Select a discovered workflow JSON first.")
     has_ref_video = bool(ltx23_ref_video) and Path(str(ltx23_ref_video)).is_file()
-    if use_pose and not has_ref_video:
-        raise gr.Error(
-            "Upload the LTX-2.5 pose reference video. With multiple workers, the reference video "
-            "must be sent with each job rather than relying on another server's previous upload."
-        )
 
     _msg, project_dir_text = open_or_create_project(project_name, book_name, part_number, author_name)
     project_dir = Path(project_dir_text)
@@ -2446,7 +2448,7 @@ def start_remote_ltx23_video_generation(
     chosen_image = ltx23_image if ltx23_image and Path(str(ltx23_image)).is_file() else poet_image
     image_copy = (
         _copy_project_asset(chosen_image, project_dir, "ltx23_input_image")
-        if (not use_pose or ltx23_pose_use_image) and chosen_image and Path(str(chosen_image)).is_file() else ""
+        if chosen_image and Path(str(chosen_image)).is_file() else ""
     )
     # Optional manual audio: used only when a section has no generated audio.
     manual_audio_copy = (
@@ -2454,7 +2456,7 @@ def start_remote_ltx23_video_generation(
         if ltx23_audio and Path(str(ltx23_audio)).is_file() else ""
     )
     ref_video_copy = (
-        _copy_project_asset(ltx23_ref_video, project_dir, "ltx23_ref_video") if use_pose and has_ref_video else ""
+        _copy_project_asset(ltx23_ref_video, project_dir, "ltx23_ref_video") if has_ref_video else ""
     )
     try:
         unload_model()
@@ -2470,10 +2472,10 @@ def start_remote_ltx23_video_generation(
 
     max_piece = float(max(2, min(60, int(ltx23_duration or 20))))
     settings = {
-        "mode": "audio+reference-video pose (LTX-2.5)" if use_pose else "image+audio-to-video",
+        "workflow": workflow_name,
         "reference_video": ref_video_copy,
         "reference_video_sha256": _file_sha(ref_video_copy),
-        "pose_use_image": bool(use_pose and image_copy),
+        "reference_image": bool(image_copy),
         "extra_positive": str(ltx23_extra_positive or "").strip(),
         "extra_negative": str(ltx23_extra_negative or "").strip(),
         "cfg": float(ltx23_cfg or 1.0),
@@ -2495,22 +2497,19 @@ def start_remote_ltx23_video_generation(
             raise RuntimeError(f"No audio for section {index}. Generate the audio first (Tab 4).")
 
         def render(number, count, out, piece_audio, seconds):
-            if use_pose:
-                prompt = base_prompt  # blank: the bridge uses the positive prompt stored in the workflow JSON
-            else:
-                prompt = base_prompt or (
+            prompt = base_prompt or (
                     "Realistic audio-conditioned video. If a reference image is available, preserve the "
                     "subject's identity and appearance. Match visible movement to the uploaded audio, "
                     "with natural facial movement and accurate lip synchronization. Context: "
                     + str(section_text)[:3000]
                 )
             output = generate_ltx_api_video(
-                workflow_kind="pose" if use_pose else "image",
+                workflow_kind=workflow_name,
                 prompt=prompt,
                 output_path=out,
                 image_path=image_copy or None,
                 audio_path=piece_audio,
-                reference_video_path=reference["video"] if use_pose else None,
+                reference_video_path=reference["video"],
                 duration=float(max(1, min(60, math.ceil(seconds)))),
                 fps=int(ltx23_fps or 24),
                 width=int(ltx23_width or 1280),
@@ -2525,8 +2524,8 @@ def start_remote_ltx23_video_generation(
 
         pipeline.generate_in_pieces(render, destination, Path(source), max_piece, destination.parent, destination.stem)
 
-    engine_name = "ltx25_pose" if use_pose else "ltx2.3"
-    label = "LTX-2.5 pose (LTX API worker pool)" if use_pose else "LTX-2.3 (LTX API worker pool)"
+    engine_name = f"ltx_api_{Path(workflow_name).stem}"
+    label = f"{workflow_name} (LTX API worker pool)"
 
     def runner(notify):
         return _remote_video_sections(
@@ -2976,22 +2975,14 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
             )
             gr.Markdown(
                 "### LTX API worker registration\n"
-                "Register up to five independent servers. Each server stores its API URL, API key, "
-                "and its registered LTX-2.3 and LTX-2.5 Pose workflow IDs in the local database. "
-                "Generation is sent to the next FREE worker; up to five workers can run at once."
+                "Register up to five independent servers. The manager automatically discovers every valid "
+                "ComfyUI API-format workflow JSON in the project folder (or LTX_WORKFLOW_DIR), registers "
+                "each workflow on every worker, and stores its workflow ID per worker. "
+                "Jobs use one FREE worker; up to five workers can run concurrently."
             )
             with gr.Row():
                 ltx_api_url = gr.Textbox(label="LTX API URL", placeholder="https://your-kaggle-or-colab-tunnel")
                 ltx_api_key = gr.Textbox(label="LTX API Key", type="password")
-            with gr.Row():
-                ltx23_workflow_file = gr.Textbox(
-                    value=str(DEFAULT_WORKFLOW_PATH),
-                    label="LTX-2.3 API workflow JSON path",
-                )
-                ltx25_pose_workflow_file = gr.Textbox(
-                    value=str(DEFAULT_POSE_WORKFLOW_PATH),
-                    label="LTX-2.5 Pose API workflow JSON path",
-                )
             with gr.Row():
                 register_ltx_worker_button = gr.Button("Register LTX API worker", variant="primary")
                 refresh_ltx_workers_button = gr.Button("Check all workers / Refresh")
@@ -3011,10 +3002,12 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
                 ltx23_width = gr.Dropdown(choices=[512, 640, 768, 832, 1024, 1280, 1536], value=1280, label="Width")
                 ltx23_height = gr.Dropdown(choices=[320, 384, 480, 512, 576, 720, 832, 1024], value=720, label="Height")
                 ltx23_seed = gr.Number(value=-1, precision=0, label="Seed (-1 = random)")
-            ltx23_workflow = gr.Radio(
-                choices=[("LTX-2.3: image + audio", "image"), ("LTX-2.5 pose: audio + reference video", "pose")],
-                value="image",
-                label="Workflow",
+            _workflow_choices = list_ltx_api_workflows()
+            ltx23_workflow = gr.Dropdown(
+                choices=_workflow_choices,
+                value=(_workflow_choices or [None])[0],
+                label="Workflow JSON (auto-discovered; refresh after adding files)",
+                allow_custom_value=False,
             )
             ltx23_ref_video = gr.Video(
                 label="Reference video for LTX-2.5 pose (24 fps, at least as long as the clip duration)",
@@ -3159,8 +3152,8 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
     generate_ltx_button.click(fn=start_remote_ltx_video_generation, inputs=[extracted_text, project_name, book_name, author_name, part_number, poet_image, video_colab_url, video_colab_token, ltx_mode, ltx_prompt, ltx_duration, ltx_fps, ltx_audio, burn_subtitles, output_resolution, subtitle_font, subtitle_font_size, max_clip_minutes], outputs=[ltx_status, ltx_preview, ltx_download], concurrency_limit=1, concurrency_id="video_generation")
     register_ltx_worker_button.click(
         fn=register_ltx_worker_from_ui,
-        inputs=[ltx_api_url, ltx_api_key, ltx23_workflow_file, ltx25_pose_workflow_file],
-        outputs=[ltx_worker_action_status, ltx_workers_table],
+        inputs=[ltx_api_url, ltx_api_key],
+        outputs=[ltx_worker_action_status, ltx_workers_table, ltx23_workflow],
     )
     refresh_ltx_workers_button.click(
         fn=refresh_ltx_workers_from_ui,
