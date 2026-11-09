@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+from contextlib import ExitStack, closing
 import time
 from contextlib import ExitStack
 from pathlib import Path
@@ -35,7 +36,7 @@ def _connect() -> sqlite3.Connection:
 
 
 def init_worker_db() -> None:
-    with _worker_db_lock, _connect() as db:
+    with _worker_db_lock, closing(_connect()) as db:
         db.execute(
             """
             CREATE TABLE IF NOT EXISTS ltx_api_workers (
@@ -405,7 +406,7 @@ def generate_ltx_api_video(
         "seed": int(seed),
         "extra_positive": str(extra_positive or "").strip(),
         "negative_prompt": str(negative_prompt or "").strip(),
-        "cfg": float(max(1.0, min(8.0, float(cfg or 1.0))),
+        "cfg": float(max(1.0, min(8.0, float(cfg or 1.0)))),
     }
     fields = {
         "workflow_id": worker["workflow_id"],
