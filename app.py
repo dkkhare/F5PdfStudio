@@ -2415,8 +2415,8 @@ def start_remote_ltx23_video_generation(
     corrected_text, project_name, book_name, author_name, part_number,
     poet_image, ltx23_image, ltx23_prompt, ltx23_duration,
     ltx23_fps, ltx23_width, ltx23_height, ltx23_seed, ltx23_audio,
-    ltx23_ref_video=None, ltx23_workflow="image",
-    ltx23_extra_positive="", ltx23_extra_negative="", ltx23_cfg=1.0, ltx23_pose_use_image=True,
+    ltx23_ref_video=None, ltx23_workflow=None,
+    ltx23_extra_positive="", ltx23_extra_negative="", ltx23_cfg=1.0,
     burn_text=True, output_resolution="1920x1080", subtitle_font="Nirmala UI", subtitle_font_size=28,
     max_clip_minutes=10.0,
 ):
