@@ -442,6 +442,16 @@ def _wait_for_worker(workflow_kind: str, wait_seconds: int, on_status=None) -> d
     check_workers()
     if not list_workers():
         raise RuntimeError("No LTX API workers are registered. Register at least one worker first.")
+    with _worker_db_lock, closing(_connect()) as db:
+        supported = db.execute(
+            "SELECT COUNT(*) AS n FROM ltx_api_worker_workflows WHERE workflow_name=?",
+            (str(workflow_kind),),
+        ).fetchone()["n"]
+    if not supported:
+        raise RuntimeError(
+            f"No registered worker has workflow '{workflow_kind}'. "
+            "Register the workers again to discover and register the current workflow JSON files."
+        )
     last_check = time.monotonic()
     while True:
         worker = _reserve_worker(workflow_kind)
