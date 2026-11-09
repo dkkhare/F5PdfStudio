@@ -98,11 +98,8 @@ from remote_colab_service import (
 )
 
 from ltx23_comfyui_service import (
-    DEFAULT_LTX23_BRIDGE_URL,
     DEFAULT_WORKFLOW_PATH,
     DEFAULT_POSE_WORKFLOW_PATH,
-    check_ltx23_bridge,
-    generate_ltx23_video,
 )
 
 from ltx_api_manager import (
@@ -2968,11 +2965,10 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
             gr.Markdown(
                 "## LTX-2.3 — ComfyUI / Colab GPU\n"
                 "The audio of every section is taken from the project's audio folder automatically (generate it in Tab 4 first). "
-                "A reference image is optional; if you omit it, the bridge reuses its previously uploaded reference image.\n\n"
-                "**LTX-2.5 pose workflow:** choose it above and upload a reference video; the head, hand and body "
-                "motion are copied from it. By default the reference image is the start frame (your person and studio); "
-                "untick the box to start from the reference video's first frame. The reference must be 24 fps and at least "
-                "as long as the longest render."
+                "A reference image is optional and is uploaded to the selected worker for each job.\n\n"
+                "**LTX-2.5 pose workflow:** upload a reference video; its head, hand and body motion guide generation. "
+                "By default the reference image is the start frame (your person and studio); untick the box to start "
+                "from the reference video's first frame. The reference must be 24 fps and at least as long as the longest render."
             )
             gr.Markdown(
                 "### LTX API worker registration\n"
@@ -3004,7 +3000,8 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
                 interactive=False,
                 elem_classes=["status-output"],
             )
-            ltx_workers_table = gr.Markdown("No LTX API workers registered yet.")
+            ltx_workers_table = gr.Markdown(ltx_workers_markdown())
+            ltx_workers_timer = gr.Timer(30) if hasattr(gr, "Timer") else None
             with gr.Row():
                 ltx23_duration = gr.Slider(2, 60, value=20, step=1, label="Maximum seconds per render (longer section audio is cut at pauses, rendered in pieces and joined)")
                 ltx23_fps = gr.Dropdown(choices=[16, 20, 24, 25, 30], value=24, label="FPS")
@@ -3017,7 +3014,7 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
                 label="Workflow",
             )
             ltx23_ref_video = gr.Video(
-                label="Reference video for LTX-2.5 pose (24 fps, at least as long as the clip duration; empty = reuse the last one sent to Colab)",
+                label="Reference video for LTX-2.5 pose (24 fps, at least as long as the clip duration)",
                 sources=["upload"],
             )
             ltx23_prompt = gr.Textbox(
@@ -3172,6 +3169,13 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
         inputs=ltx_remove_worker_id,
         outputs=[ltx_worker_action_status, ltx_workers_table],
     )
+    if ltx_workers_timer is not None:
+        ltx_workers_timer.tick(
+            fn=refresh_ltx_workers_from_ui,
+            inputs=[],
+            outputs=[ltx_worker_action_status, ltx_workers_table],
+            show_progress="hidden",
+        )
     generate_ltx23_button.click(
         fn=start_remote_ltx23_video_generation,
         inputs=[
