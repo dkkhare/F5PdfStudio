@@ -8,9 +8,8 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
-from contextlib import ExitStack, closing
 import time
-from contextlib import ExitStack
+from contextlib import ExitStack, closing
 from pathlib import Path
 from typing import Any
 
@@ -139,7 +138,7 @@ def register_worker(
                     api_key=excluded.api_key,
                     ltx23_workflow_id=excluded.ltx23_workflow_id,
                     ltx25_pose_workflow_id=excluded.ltx25_pose_workflow_id,
-                    status='FREE', current_job_id=NULL,
+                    status=CASE WHEN ltx_api_workers.status='BUSY' THEN 'BUSY' ELSE 'FREE' END,
                     consecutive_failures=0, last_health_check=CURRENT_TIMESTAMP
                 """,
                 (base, key, ltx23_id, pose_id),
@@ -157,7 +156,7 @@ def register_worker(
 
 def list_workers() -> list[dict[str, Any]]:
     init_worker_db()
-    with _worker_db_lock, _connect() as db:
+    with _worker_db_lock, closing(_connect()) as db:
         rows = db.execute(
             """
             SELECT id, base_url, status, current_job_id, consecutive_failures,
@@ -190,7 +189,7 @@ def workers_markdown() -> str:
 
 def remove_worker(worker_id: int) -> str:
     init_worker_db()
-    with _worker_db_lock, _connect() as db:
+    with _worker_db_lock, closing(_connect()) as db:
         cursor = db.execute("DELETE FROM ltx_api_workers WHERE id = ?", (int(worker_id),))
         if cursor.rowcount:
             return f"Removed LTX API worker {worker_id} from the database."
@@ -204,7 +203,7 @@ def check_workers() -> str:
     messages: list[str] = []
     for worker in workers:
         worker_id = int(worker["id"])
-        with _worker_db_lock, _connect() as db:
+        with _worker_db_lock, closing(_connect()) as db:
             row = db.execute(
                 "SELECT base_url, api_key FROM ltx_api_workers WHERE id = ?", (worker_id,)
             ).fetchone()
@@ -217,7 +216,7 @@ def check_workers() -> str:
                 timeout=HEALTH_TIMEOUT,
             )
             response.raise_for_status()
-            with _worker_db_lock, _connect() as db:
+            with _worker_db_lock, closing(_connect()) as db:
                 db.execute(
                     """
                     UPDATE ltx_api_workers
@@ -304,7 +303,7 @@ def _reserve_worker(workflow_kind: str) -> dict[str, Any] | None:
 
 
 def _set_job(worker_id: int, job_id: str) -> None:
-    with _worker_db_lock, _connect() as db:
+    with _worker_db_lock, closing(_connect()) as db:
         db.execute(
             "UPDATE ltx_api_workers SET current_job_id=? WHERE id=?",
             (str(job_id), int(worker_id)),
@@ -312,7 +311,7 @@ def _set_job(worker_id: int, job_id: str) -> None:
 
 
 def _release_worker(worker_id: int) -> None:
-    with _worker_db_lock, _connect() as db:
+    with _worker_db_lock, closing(_connect()) as db:
         db.execute(
             """
             UPDATE ltx_api_workers SET status='FREE', current_job_id=NULL
@@ -324,7 +323,8 @@ def _release_worker(worker_id: int) -> None:
 
 def _wait_for_worker(workflow_kind: str, wait_seconds: int, on_status=None) -> dict[str, Any]:
     deadline = time.monotonic() + max(0, int(wait_seconds))
-    last_check = 0.0
+    check_workers()
+    last_check = time.monotonic()
     while True:
         worker = _reserve_worker(workflow_kind)
         if worker:
