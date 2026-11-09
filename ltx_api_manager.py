@@ -6,6 +6,7 @@ workflow IDs are registered independently on every worker.
 from __future__ import annotations
 
 import json
+import os
 import secrets
 import sqlite3
 import threading
@@ -669,7 +670,7 @@ def generate_ltx_api_video(
         chosen_seed = secrets.randbelow(2**32 - 1)
     positive_prompt = str(prompt or "").strip()
     if str(extra_positive or "").strip():
-        positive_prompt = (positive_prompt + "\\n" + str(extra_positive).strip()).strip()
+        positive_prompt = (positive_prompt + "\n" + str(extra_positive).strip()).strip()
     inputs, bindings, output_node_id = _workflow_job_payload(
         workflow_graph,
         prompt=positive_prompt,
@@ -700,7 +701,7 @@ def generate_ltx_api_video(
             }
             if image_file is not None:
                 files["image"] = (image_file.name, stack.enter_context(image_file.open("rb")), "application/octet-stream")
-            if kind == "pose" and video_file is not None:
+            if video_file is not None:
                 files["video"] = (video_file.name, stack.enter_context(video_file.open("rb")), "application/octet-stream")
             response = requests.post(
                 f"{base}/jobs",
@@ -755,7 +756,6 @@ def generate_ltx_api_video(
                         {"node_id": node_id, **(value if isinstance(value, dict) else {"value": value})}
                         for node_id, value in outputs.items()
                     ]
-                output_node_id = "453" if kind == "pose" else "341"
                 selected = next(
                     (
                         item for item in outputs
