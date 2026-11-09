@@ -268,9 +268,11 @@ def list_workers() -> list[dict[str, Any]]:
     with _worker_db_lock, closing(_connect()) as db:
         rows = db.execute(
             """
-            SELECT id, base_url, status, current_job_id, consecutive_failures,
-                   last_health_check, ltx23_workflow_id, ltx25_pose_workflow_id
-            FROM ltx_api_workers ORDER BY id
+            SELECT w.id, w.base_url, w.status, w.current_job_id, w.consecutive_failures,
+                   w.last_health_check,
+                   COALESCE((SELECT group_concat(ww.workflow_name, ', ')
+                             FROM ltx_api_worker_workflows ww WHERE ww.worker_id=w.id), '') AS workflows
+            FROM ltx_api_workers w ORDER BY w.id
             """
         ).fetchall()
     return [dict(row) for row in rows]
@@ -281,21 +283,20 @@ def workers_markdown() -> str:
     if not workers:
         return "No LTX API workers registered yet."
     lines = [
-        "| ID | LTX API URL | Status | Current job | Failed checks | LTX-2.3 workflow ID | LTX-2.5 Pose workflow ID |",
-        "|---:|---|---|---|---:|---|---|",
+        "| ID | LTX API URL | Status | Current job | Failed checks | Registered workflows |",
+        "|---:|---|---|---|---:|---|",
     ]
     for worker in workers:
         url = worker["base_url"].replace("|", "%7C")
         job = worker.get("current_job_id") or "—"
+        names = (worker.get("workflows") or "None").replace("|", "%7C")
         lines.append(
             f"| LTX API {worker['id']} | {url} | {worker['status']} | {job} | "
-            f"{worker['consecutive_failures']} | {worker['ltx23_workflow_id']} | "
-            f"{worker['ltx25_pose_workflow_id']} |"
+            f"{worker['consecutive_failures']} | {names} |"
         )
     lines.append("")
-    lines.append("Workflow IDs are stored per worker for LTX-2.3 and LTX-2.5 Pose.")
+    lines.append("Workflow IDs are maintained separately for every discovered JSON workflow on each worker.")
     return "\n".join(lines)
-
 
 def remove_worker(worker_id: int) -> str:
     init_worker_db()
