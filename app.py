@@ -2887,7 +2887,7 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
             "whole video, and the clip is saved as `<book>_<part>_<nnn>.mp4` in the project's `video/sections` folder. "
             "When all sections are finished they are combined into clips of at most the length below; a section is never cut."
         )
-        video_engine = gr.Dropdown(choices=[("SadTalker — local", "sadtalker"), ("Wan2.2 — Colab", "wan2.2"), ("LTX-2.5 — Colab", "ltx2.5"), ("LTX-2.3 / LTX-2.5 pose — ComfyUI / Colab GPU", "ltx2.3")], value="sadtalker", label="Video engine")
+        video_engine = gr.Dropdown(choices=[("SadTalker — local", "sadtalker"), ("Wan2.2 — Colab", "wan2.2"), ("LTX-2.5 — Colab", "ltx2.5"), ("LTX-2.3 / LTX-2.5 Pose — LTX API worker pool", "ltx2.3")], value="sadtalker", label="Video engine")
         poet_image = gr.Image(label="Portrait / character image", type="filepath", sources=["upload"])
         with gr.Row():
             burn_subtitles = gr.Checkbox(value=True, label="Burn the section text on every video")
@@ -2966,7 +2966,7 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
 
         with gr.Group(visible=False) as ltx23_video_group:
             gr.Markdown(
-                "## LTX-2.3 — ComfyUI / Colab GPU\n"
+                "## LTX API — LTX-2.3 / LTX-2.5 Pose\n"
                 "The audio of every section is taken from the project's audio folder automatically (generate it in Tab 4 first). "
                 "A reference image is optional and is uploaded to the selected worker for each job.\n\n"
                 "**LTX-2.5 pose workflow:** upload a reference video; its head, hand and body motion guide generation. "
@@ -3057,7 +3057,7 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
             )
             with gr.Row():
                 generate_ltx23_button = gr.Button("Generate / Resume LTX video", variant="primary")
-            ltx23_status = gr.Textbox(label="LTX-2.3 status", lines=8, interactive=False, elem_classes=["status-output"])
+            ltx23_status = gr.Textbox(label="LTX API generation status", lines=8, interactive=False, elem_classes=["status-output"])
             ltx23_preview = gr.Video(label="LTX-2.3 result")
             ltx23_download = gr.File(label="Download combined clips / section videos", file_count="multiple")
 
