@@ -1,7 +1,7 @@
-"""SQLite-backed pool of up to five registered LTX API workers.
+"""SQLite-backed pool of up to five workers with dynamically discovered workflows.
 
-Each worker has its own URL and X-API-Key. LTX-2.3 and LTX-2.5 Pose
-workflow IDs are registered independently on every worker.
+Each worker has its own URL and X-API-Key. Workflow IDs and workflow metadata
+are stored per worker without assuming model names or workflow filenames.
 """
 from __future__ import annotations
 
@@ -40,23 +40,51 @@ def _connect() -> sqlite3.Connection:
 
 def init_worker_db() -> None:
     with _worker_db_lock, closing(_connect()) as db:
-        db.execute(
-            """
-            CREATE TABLE IF NOT EXISTS ltx_api_workers (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                base_url TEXT NOT NULL UNIQUE,
-                api_key TEXT NOT NULL,
-                ltx23_workflow_id TEXT NOT NULL DEFAULT '',
-                ltx25_pose_workflow_id TEXT NOT NULL DEFAULT '',
-                status TEXT NOT NULL DEFAULT 'FREE',
-                current_job_id TEXT,
-                consecutive_failures INTEGER NOT NULL DEFAULT 0,
-                last_health_check TEXT,
-                last_used REAL NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        existing = db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='ltx_api_workers'"
+        ).fetchone()
+        if existing:
+            columns = {
+                row["name"] for row in db.execute("PRAGMA table_info(ltx_api_workers)").fetchall()
+            }
+            if "ltx23_workflow_id" in columns or "ltx25_pose_workflow_id" in columns:
+                # Migrate the earlier two-workflow schema while preserving worker credentials/status.
+                db.execute("DROP TABLE IF EXISTS ltx_api_worker_workflows")
+                db.execute("ALTER TABLE ltx_api_workers RENAME TO ltx_api_workers_legacy")
+                existing = None
+
+        if not existing:
+            db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS ltx_api_workers (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    base_url TEXT NOT NULL UNIQUE,
+                    api_key TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'FREE',
+                    current_job_id TEXT,
+                    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+                    last_health_check TEXT,
+                    last_used REAL NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
             )
-            """
-        )
+            legacy = db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='ltx_api_workers_legacy'"
+            ).fetchone()
+            if legacy:
+                db.execute(
+                    """
+                    INSERT INTO ltx_api_workers
+                        (id, base_url, api_key, status, current_job_id,
+                         consecutive_failures, last_health_check, last_used, created_at)
+                    SELECT id, base_url, api_key, status, current_job_id,
+                           consecutive_failures, last_health_check, last_used, created_at
+                    FROM ltx_api_workers_legacy
+                    """
+                )
+                db.execute("DROP TABLE ltx_api_workers_legacy")
+
         db.execute(
             """
             CREATE TABLE IF NOT EXISTS ltx_api_worker_workflows (
@@ -70,7 +98,6 @@ def init_worker_db() -> None:
             )
             """
         )
-
 
 def _headers(api_key: str) -> dict[str, str]:
     return {"X-API-Key": str(api_key or "").strip()}
@@ -108,26 +135,6 @@ def _load_workflow(path: str | Path) -> tuple[str, dict[str, Any]]:
     if not isinstance(workflow, dict) or not workflow:
         raise ValueError(f"Workflow JSON is empty or invalid: {workflow_path.name}")
     return workflow_path.name, workflow
-
-
-def _register_one(base_url: str, api_key: str, path: str | Path) -> str:
-    name, workflow = _load_workflow(path)
-    response = requests.post(
-        f"{base_url}/workflows/register",
-        headers={**_headers(api_key), "Content-Type": "application/json"},
-        json={"name": name, "workflow": workflow},
-        timeout=120,
-    )
-    if not response.ok:
-        raise RuntimeError(
-            f"Workflow registration failed for {name} (HTTP {response.status_code}): "
-            f"{response.text[:2000]}"
-        )
-    body = response.json()
-    workflow_id = str(body.get("workflow_id") or "").strip()
-    if not body.get("success", True) or not workflow_id:
-        raise RuntimeError(f"Worker did not return a valid workflow_id for {name}: {body}")
-    return workflow_id
 
 
 def _workflow_candidates(directory: str | Path | None = None) -> list[Path]:
@@ -219,7 +226,6 @@ def register_worker(base_url: str, api_key: str, *unused_workflow_paths: str | P
     _assert_healthy(health)
 
     registered = [_register_one(base, key, path) for path in candidates]
-    first_id = registered[0][1]
 
     with _worker_db_lock:
         db = _connect()
@@ -235,17 +241,15 @@ def register_worker(base_url: str, api_key: str, *unused_workflow_paths: str | P
             db.execute(
                 """
                 INSERT INTO ltx_api_workers
-                    (base_url, api_key, ltx23_workflow_id, ltx25_pose_workflow_id,
-                     status, current_job_id, consecutive_failures, last_health_check)
-                VALUES (?, ?, ?, ?, 'FREE', NULL, 0, CURRENT_TIMESTAMP)
+                    (base_url, api_key, status, current_job_id,
+                     consecutive_failures, last_health_check)
+                VALUES (?, ?, 'FREE', NULL, 0, CURRENT_TIMESTAMP)
                 ON CONFLICT(base_url) DO UPDATE SET
                     api_key=excluded.api_key,
-                    ltx23_workflow_id=excluded.ltx23_workflow_id,
-                    ltx25_pose_workflow_id=excluded.ltx25_pose_workflow_id,
                     status=CASE WHEN ltx_api_workers.status='BUSY' THEN 'BUSY' ELSE 'FREE' END,
                     consecutive_failures=0, last_health_check=CURRENT_TIMESTAMP
                 """,
-                (base, key, first_id, first_id),
+                (base, key),
             )
             worker = db.execute(
                 "SELECT id FROM ltx_api_workers WHERE base_url=?", (base,)
