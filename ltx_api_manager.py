@@ -196,7 +196,7 @@ def workers_markdown() -> str:
         url = worker["base_url"].replace("|", "%7C")
         job = worker.get("current_job_id") or "—"
         lines.append(
-            f"| {worker['id']} | {url} | {worker['status']} | {job} | "
+            f"| LTX API {worker['id']} | {url} | {worker['status']} | {job} | "
             f"{worker['consecutive_failures']} | {worker['ltx23_workflow_id']} | "
             f"{worker['ltx25_pose_workflow_id']} |"
         )
