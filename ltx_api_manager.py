@@ -61,6 +61,21 @@ def _headers(api_key: str) -> dict[str, str]:
     return {"X-API-Key": str(api_key or "").strip()}
 
 
+def _assert_healthy(response: requests.Response) -> dict[str, Any]:
+    response.raise_for_status()
+    try:
+        body = response.json()
+    except Exception as exc:
+        raise RuntimeError("Worker /health did not return valid JSON.") from exc
+    status = str(body.get("status") or "").lower()
+    if status in {"degraded", "offline", "error", "unhealthy", "failed"}:
+        raise RuntimeError(f"Worker health status is {status}: {body}")
+    comfy = body.get("comfyui")
+    if isinstance(comfy, dict) and comfy.get("reachable") is False:
+        raise RuntimeError(f"Worker is online but ComfyUI is unreachable: {comfy}")
+    return body
+
+
 def _normalise_url(value: str) -> str:
     url = str(value or "").strip().rstrip("/")
     if not url:
@@ -114,7 +129,7 @@ def register_worker(
         raise ValueError("Enter the API key for this LTX API worker.")
 
     health = requests.get(f"{base}/health", headers=_headers(key), timeout=HEALTH_TIMEOUT)
-    health.raise_for_status()
+    _assert_healthy(health)
 
     ltx23_id = _register_one(base, key, ltx23_workflow_path)
     pose_id = _register_one(base, key, ltx25_pose_workflow_path)
@@ -218,7 +233,7 @@ def check_workers() -> str:
                 headers=_headers(row["api_key"]),
                 timeout=HEALTH_TIMEOUT,
             )
-            response.raise_for_status()
+            _assert_healthy(response)
             with _worker_db_lock, closing(_connect()) as db:
                 db.execute(
                     """
@@ -425,8 +440,11 @@ def generate_ltx_api_video(
                 "multiple": 128,
             },
         }
-        if str(prompt or "").strip():
-            inputs["411"] = {"text": str(prompt).strip()}
+        pose_prompt = str(prompt or "").strip()
+        if str(extra_positive or "").strip():
+            pose_prompt = (pose_prompt + "\\n" + str(extra_positive).strip()).strip()
+        if pose_prompt:
+            inputs["411"] = {"text": pose_prompt}
         if str(negative_prompt or "").strip():
             inputs["419"] = {"text": str(negative_prompt).strip()}
     else:
