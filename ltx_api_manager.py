@@ -452,7 +452,7 @@ def generate_ltx_api_video(
         }
         pose_prompt = str(prompt or "").strip()
         if str(extra_positive or "").strip():
-            pose_prompt = (pose_prompt + "\\n" + str(extra_positive).strip()).strip()
+            pose_prompt = (pose_prompt + "\n" + str(extra_positive).strip()).strip()
         if pose_prompt:
             inputs["411"] = {"text": pose_prompt}
         if str(negative_prompt or "").strip():
@@ -469,7 +469,7 @@ def generate_ltx_api_video(
             chosen_seed = secrets.randbelow(2**32 - 1)
         positive_prompt = str(prompt or "").strip()
         if str(extra_positive or "").strip():
-            positive_prompt = (positive_prompt + "\\n" + str(extra_positive).strip()).strip()
+            positive_prompt = (positive_prompt + "\n" + str(extra_positive).strip()).strip()
         inputs = {
             "340:319": {"value": positive_prompt},
             "340:331": {"value": max(1.0, min(60.0, float(duration)))},
