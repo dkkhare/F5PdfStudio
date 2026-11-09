@@ -181,7 +181,8 @@ def workers_markdown() -> str:
         job = worker.get("current_job_id") or "—"
         lines.append(
             f"| {worker['id']} | {url} | {worker['status']} | {job} | "
-            f"{worker['consecutive_failures']} |"
+            f"{worker['consecutive_failures']} | {worker['ltx23_workflow_id']} | "
+            f"{worker['ltx25_pose_workflow_id']} |"
         )
     lines.append("")
     lines.append("Workflow IDs are stored per worker for LTX-2.3 and LTX-2.5 Pose.")
