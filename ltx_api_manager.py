@@ -452,6 +452,139 @@ def _file_binding(node_id: str, input_name: str) -> dict[str, str]:
     return {"node_id": str(node_id), "input_name": str(input_name), "upload_type": "input"}
 
 
+
+def _node_links(value: Any) -> list[str]:
+    if isinstance(value, (list, tuple)) and len(value) >= 2:
+        if isinstance(value[0], (str, int)) and isinstance(value[1], int):
+            return [str(value[0])]
+    return []
+
+
+def _workflow_job_payload(
+    graph: dict[str, Any], *, prompt: str, negative_prompt: str,
+    duration: float, fps: int, width: int, height: int, seed: int, cfg: float,
+    image_path: Path | None, audio_path: Path, video_path: Path | None,
+) -> tuple[dict[str, Any], dict[str, Any], str | None]:
+    """Infer upload bindings and editable inputs from the workflow graph itself."""
+    inputs: dict[str, Any] = {}
+    bindings: dict[str, Any] = {}
+    nodes = {str(k): v for k, v in graph.items() if isinstance(v, dict)}
+    downstream: dict[str, list[tuple[str, str]]] = {}
+    for target_id, node in nodes.items():
+        for field, value in (node.get("inputs") or {}).items():
+            for source_id in _node_links(value):
+                downstream.setdefault(source_id, []).append((target_id, str(field).lower()))
+
+    def ancestors(target_id: str) -> set[str]:
+        seen: set[str] = set()
+        stack = [target_id]
+        while stack:
+            current = stack.pop()
+            if current in seen:
+                continue
+            seen.add(current)
+            node = nodes.get(current, {})
+            for value in (node.get("inputs") or {}).values():
+                stack.extend(_node_links(value))
+        return seen
+
+    positive_sources: set[str] = set()
+    negative_sources: set[str] = set()
+    for target_id, node in nodes.items():
+        cls = str(node.get("class_type") or "").lower()
+        if "conditioning" in cls or "guider" in cls:
+            for field, value in (node.get("inputs") or {}).items():
+                field = str(field).lower()
+                sources = _node_links(value)
+                if field in {"positive", "positive_cond", "positive_conditioning"}:
+                    for source in sources:
+                        positive_sources.update(ancestors(source))
+                elif field in {"negative", "negative_cond", "negative_conditioning"}:
+                    for source in sources:
+                        negative_sources.update(ancestors(source))
+
+    positive_text = str(prompt or "").strip()
+    negative_text = str(negative_prompt or "").strip()
+    text_candidates: list[tuple[str, str, str]] = []
+    output_node_id: str | None = None
+
+    for node_id, node in nodes.items():
+        cls = str(node.get("class_type") or "")
+        lower_cls = cls.lower()
+        node_inputs = node.get("inputs") or {}
+        override: dict[str, Any] = {}
+
+        # Identify media loaders by node class and its actual input names.
+        if "loadimage" in lower_cls and image_path is not None:
+            field = next((x for x in node_inputs if str(x).lower() in {"image", "file", "path"}), None)
+            if field:
+                bindings.setdefault("image", _file_binding(node_id, str(field)))
+        elif "loadaudio" in lower_cls:
+            field = next((x for x in node_inputs if str(x).lower() in {"audio", "file", "path"}), None)
+            if field:
+                bindings.setdefault("audio", _file_binding(node_id, str(field)))
+        elif "loadvideo" in lower_cls and video_path is not None:
+            field = next((x for x in node_inputs if str(x).lower() in {"file", "video", "path"}), None)
+            if field:
+                bindings.setdefault("video", _file_binding(node_id, str(field)))
+
+        # Apply values only to inputs whose names express the setting.
+        for field in node_inputs:
+            key = str(field).lower()
+            if key in {"noise_seed", "seed", "seed_value"}:
+                override[field] = int(seed)
+            elif key in {"width", "video_width"}:
+                override[field] = int(width)
+            elif key in {"height", "video_height"}:
+                override[field] = int(height)
+            elif key in {"duration", "seconds", "video_duration"}:
+                override[field] = float(duration)
+            elif key in {"fps", "frame_rate", "framerate"}:
+                override[field] = int(fps)
+            elif key in {"cfg", "video_cfg", "audio_cfg"}:
+                override[field] = float(cfg)
+            elif key in {"length", "num_frames", "frame_count"}:
+                override[field] = max(1, int(round(float(duration) * int(fps))))
+
+        # Text node candidates are resolved through conditioning graph links.
+        for field, value in node_inputs.items():
+            field_lower = str(field).lower()
+            if field_lower not in {"text", "value", "prompt", "positive_prompt", "negative_prompt"}:
+                continue
+            if not isinstance(value, str):
+                continue
+            if "text" in lower_cls or "prompt" in lower_cls or "primitive" in lower_cls:
+                text_candidates.append((node_id, str(field), lower_cls))
+
+        if any(token in lower_cls for token in ("savevideo", "videocombine", "saveanimated", "savewebm")):
+            output_node_id = node_id
+            if "filename_prefix" in node_inputs:
+                override["filename_prefix"] = f"video/F5PdfStudio_{secrets.token_hex(5)}"
+        if override:
+            inputs[node_id] = override
+
+    # Only override prompt nodes when the graph identifies their role unambiguously.
+    for node_id, field, _cls in text_candidates:
+        if node_id in negative_sources and negative_text:
+            inputs.setdefault(node_id, {})[field] = negative_text
+        elif node_id in positive_sources and positive_text:
+            inputs.setdefault(node_id, {})[field] = positive_text
+    unresolved = [
+        item for item in text_candidates
+        if item[0] not in positive_sources and item[0] not in negative_sources
+    ]
+    if positive_text and not positive_sources and len(unresolved) == 1:
+        node_id, field, _ = unresolved[0]
+        inputs.setdefault(node_id, {})[field] = positive_text
+
+    if audio_path and "audio" not in bindings:
+        raise ValueError("The selected workflow has no detectable audio loader node.")
+    if image_path and "image" not in bindings:
+        raise ValueError("An image was supplied, but the selected workflow has no detectable image loader node.")
+    if video_path and "video" not in bindings:
+        raise ValueError("A reference video was supplied, but the selected workflow has no detectable video loader node.")
+    return inputs, bindings, output_node_id
+
 def generate_ltx_api_video(
     *,
     workflow_kind: str,
@@ -473,7 +606,9 @@ def generate_ltx_api_video(
     on_status=None,
 ) -> str:
     """Reserve one free worker, submit one job, poll it, download, then release."""
-    kind = "pose" if workflow_kind == "pose" else "image"
+    workflow_name = str(workflow_kind or "").strip()
+    if not workflow_name:
+        raise ValueError("Select a discovered workflow before generating.")
     audio_file = Path(str(audio_path or "")).expanduser()
     image_file = Path(str(image_path)).expanduser() if image_path else None
     video_file = Path(str(reference_video_path)).expanduser() if reference_video_path else None
@@ -481,12 +616,10 @@ def generate_ltx_api_video(
         raise FileNotFoundError(f"Audio file not found: {audio_file}")
     if image_file is not None and not image_file.is_file():
         raise FileNotFoundError(f"Reference image not found: {image_file}")
-    if kind == "pose" and video_file is None:
-        raise ValueError("LTX-2.5 Pose requires a reference video for each job.")
-    if kind == "pose" and not video_file.is_file():
+    if video_file is not None and not video_file.is_file():
         raise FileNotFoundError(f"Reference video not found: {video_file}")
 
-    worker = _wait_for_worker(kind, wait_seconds=min(timeout, 1800), on_status=on_status)
+    worker = _wait_for_worker(workflow_name, wait_seconds=min(timeout, 1800), on_status=on_status)
     worker_id = int(worker["id"])
     base = worker["base_url"]
     key = worker["api_key"]
@@ -494,74 +627,38 @@ def generate_ltx_api_video(
     destination = Path(output_path)
     destination.parent.mkdir(parents=True, exist_ok=True)
 
-    if kind == "pose":
-        # LTX-2.5 pose API workflow: LoadAudio 503, LoadVideo 506,
-        # optional start-image LoadImage 452, prompt 411, FPS 422, SaveVideo 453.
-        bindings = {"audio": _file_binding("503", "audio")}
-        if video_file is not None:
-            bindings["video"] = {
-                "node_id": "506", "input_name": "file", "upload_type": "input"
-            }
-        if image_file is not None:
-            bindings["image"] = {
-                "node_id": "452", "input_name": "image", "upload_type": "image"
-            }
-        chosen_seed = int(seed)
-        if chosen_seed < 0:
-            chosen_seed = secrets.randbelow(2**32 - 1)
-        ratio = float(width) / max(1.0, float(height))
-        aspect_ratio = "16:9 (Widescreen)" if abs(ratio - 16 / 9) < 0.08 else (
-            "9:16 (Portrait)" if ratio < 1 else "4:3"
+    workflow_path = Path(worker["workflow_path"])
+    if not workflow_path.is_file():
+        raise FileNotFoundError(
+            f"Workflow file is no longer available: {workflow_path}. Re-register workers after adding or moving workflow JSON files."
         )
-        megapixels = max(0.3, min(2.0, (int(width) * int(height)) / 1_000_000))
-        inputs = {
-            "422": {"value": int(max(1, min(60, int(fps))))},
-            "433": {"noise_seed": chosen_seed},
-            "442": {"noise_seed": chosen_seed + 1},
-            "435": {
-                "video_cfg": float(max(1.0, min(8.0, float(cfg or 1.0)))),
-                "audio_cfg": float(max(1.0, min(8.0, float(cfg or 1.0)))),
-            },
-            "474": {
-                "aspect_ratio": aspect_ratio,
-                "megapixels": megapixels,
-                "multiple": 128,
-            },
-        }
-        pose_prompt = str(prompt or "").strip()
-        if str(extra_positive or "").strip():
-            pose_prompt = (pose_prompt + "\n" + str(extra_positive).strip()).strip()
-        if pose_prompt:
-            inputs["411"] = {"text": pose_prompt}
-        if str(negative_prompt or "").strip():
-            inputs["419"] = {"text": str(negative_prompt).strip()}
-    else:
-        # F5PdfStudio LTX-2.3 API workflow node IDs.
-        bindings = {"audio": _file_binding("276", "audio")}
-        if image_file is not None:
-            bindings["image"] = {
-                "node_id": "269", "input_name": "image", "upload_type": "image"
-            }
-        chosen_seed = int(seed)
-        if chosen_seed < 0:
-            chosen_seed = secrets.randbelow(2**32 - 1)
-        positive_prompt = str(prompt or "").strip()
-        if str(extra_positive or "").strip():
-            positive_prompt = (positive_prompt + "\n" + str(extra_positive).strip()).strip()
-        inputs = {
-            "340:319": {"value": positive_prompt},
-            "340:331": {"value": max(1.0, min(60.0, float(duration)))},
-            "340:323": {"value": int(max(1, min(60, int(fps))))},
-            "340:330": {"value": int(max(256, min(2048, int(width))))},
-            "340:324": {"value": int(max(256, min(2048, int(height))))},
-            "340:285": {"noise_seed": chosen_seed},
-            "340:286": {"noise_seed": chosen_seed + 1},
-            "340:290": {"cfg": float(max(1.0, min(8.0, float(cfg or 1.0))))},
-            "340:315": {"cfg": float(max(1.0, min(8.0, float(cfg or 1.0))))},
-            "341": {"filename_prefix": f"video/F5PdfStudio_LTX23_{secrets.token_hex(5)}"},
-        }
-        if str(negative_prompt or "").strip():
-            inputs["340:314"] = {"text": str(negative_prompt).strip()}
+    import hashlib
+    current_hash = hashlib.sha256(workflow_path.read_bytes()).hexdigest()
+    if current_hash != worker["workflow_hash"]:
+        raise RuntimeError(
+            f"Workflow '{workflow_name}' changed after registration. Register the worker again to sync the updated JSON."
+        )
+    _, workflow_graph = _load_workflow(workflow_path)
+    chosen_seed = int(seed)
+    if chosen_seed < 0:
+        chosen_seed = secrets.randbelow(2**32 - 1)
+    positive_prompt = str(prompt or "").strip()
+    if str(extra_positive or "").strip():
+        positive_prompt = (positive_prompt + "\\n" + str(extra_positive).strip()).strip()
+    inputs, bindings, output_node_id = _workflow_job_payload(
+        workflow_graph,
+        prompt=positive_prompt,
+        negative_prompt=str(negative_prompt or "").strip(),
+        duration=float(max(0.1, min(600.0, float(duration)))),
+        fps=int(max(1, min(120, int(fps)))),
+        width=int(max(1, min(8192, int(width)))),
+        height=int(max(1, min(8192, int(height)))),
+        seed=chosen_seed,
+        cfg=float(max(0.0, min(100.0, float(cfg or 1.0)))),
+        image_path=image_file,
+        audio_path=audio_file,
+        video_path=video_file,
+    )
     fields = {
         "workflow_id": worker["workflow_id"],
         "inputs": json.dumps(inputs, ensure_ascii=False),
@@ -637,7 +734,7 @@ def generate_ltx_api_video(
                 selected = next(
                     (
                         item for item in outputs
-                        if str(item.get("node_id") or item.get("node") or "") == output_node_id
+                        if output_node_id and str(item.get("node_id") or item.get("node") or "") == output_node_id
                     ),
                     None,
                 )
