@@ -325,6 +325,8 @@ def _release_worker(worker_id: int) -> None:
 def _wait_for_worker(workflow_kind: str, wait_seconds: int, on_status=None) -> dict[str, Any]:
     deadline = time.monotonic() + max(0, int(wait_seconds))
     check_workers()
+    if not list_workers():
+        raise RuntimeError("No LTX API workers are registered. Register at least one worker first.")
     last_check = time.monotonic()
     while True:
         worker = _reserve_worker(workflow_kind)
@@ -335,6 +337,8 @@ def _wait_for_worker(workflow_kind: str, wait_seconds: int, on_status=None) -> d
             raise TimeoutError("No registered LTX API worker became free before the wait timeout.")
         if now - last_check >= 30:
             check_workers()
+            if not list_workers():
+                raise RuntimeError("All LTX API worker registrations were removed after failed health checks.")
             last_check = now
         if on_status:
             on_status("All registered LTX API workers are busy or offline. Waiting for a free worker...")
