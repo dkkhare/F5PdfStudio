@@ -2420,12 +2420,7 @@ def start_remote_ltx23_video_generation(
     burn_text=True, output_resolution="1920x1080", subtitle_font="Nirmala UI", subtitle_font_size=28,
     max_clip_minutes=10.0,
 ):
-    """Registered LTX API workflows on the shared worker pool, section by section.
-
-    ltx23_workflow == "image": LTX-2.3 image + audio.
-    ltx23_workflow == "pose":  LTX-2.5 audio + reference video (head/hand/body motion from the video).
-    The audio of every section is taken from the project's audio folder automatically.
-    """
+    """Render project sections through the selected discovered workflow on the shared worker pool."""
     if not project_name or not str(project_name).strip():
         raise gr.Error("Enter the project name first.")
     if not str(book_name or "").strip() or not str(part_number or "").strip():
