@@ -9,6 +9,7 @@ import re
 import shutil
 import threading
 import time
+import uuid
 import wave
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -279,6 +280,31 @@ def persist_project_tabs(
             try: updates["poet_image"] = _copy_project_asset(poet_image, project_directory, "poet_portrait")
             except (OSError, ValueError): pass
     save_project_state(output_directory, updates)
+
+
+def _persist_uploaded_image(source):
+    """Move a Gradio image upload out of its expiring cache and return a stable path."""
+    if source is None or source == "":
+        return None
+    if isinstance(source, dict):
+        source = source.get("path") or source.get("name") or source.get("orig_name")
+    elif hasattr(source, "path"):
+        source = source.path
+    if not source:
+        raise gr.Error("The uploaded image has no readable file path. Please upload it again.")
+
+    source_path = Path(str(source)).expanduser()
+    if not source_path.is_file():
+        raise gr.Error(
+            "The image upload has expired or is no longer available. "
+            "Please upload the image again; it will then be stored for the generation job."
+        )
+    source_path = source_path.resolve()
+    storage_directory = Path(__file__).resolve().parent / ".runtime_uploads"
+    storage_directory.mkdir(parents=True, exist_ok=True)
+    destination = storage_directory / f"{uuid.uuid4().hex}{source_path.suffix.lower()}"
+    shutil.copy2(source_path, destination)
+    return str(destination.resolve())
 
 
 def _copy_project_asset(source, project_directory: Path, stem: str) -> str:
@@ -2880,6 +2906,8 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
         video_engine = gr.Dropdown(choices=[("SadTalker — local", "sadtalker"), ("Wan2.2 — Colab", "wan2.2"), ("LTX-2.5 — Colab", "ltx2.5"), ("LTX-2.3 / LTX-2.5 Pose — LTX API worker pool", "ltx2.3")], value="sadtalker", label="Video engine")
         ltx_workers_timer = gr.Timer(30) if hasattr(gr, "Timer") else None
         poet_image = gr.Image(label="Portrait / character image", type="filepath", sources=["upload"])
+        poet_image_state = gr.State(value=None)
+        poet_image.change(fn=_persist_uploaded_image, inputs=poet_image, outputs=poet_image_state)
         with gr.Row():
             burn_subtitles = gr.Checkbox(value=True, label="Burn the section text on every video")
             output_resolution = gr.Dropdown(choices=["1280x720", "1920x1080"], value="1920x1080", label="Output resolution")
@@ -3026,6 +3054,8 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
                 type="filepath",
                 sources=["upload"],
             )
+            ltx23_image_state = gr.State(value=None)
+            ltx23_image.change(fn=_persist_uploaded_image, inputs=ltx23_image, outputs=ltx23_image_state)
             ltx23_audio = gr.Audio(
                 label="Optional fallback audio (the section audio from Tab 4 is used automatically)",
                 type="filepath",
@@ -3064,6 +3094,8 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
             gemini_veo_resolution = gr.Dropdown(choices=["720p", "1080p"], value=GEMINI_DEFAULT_VEO_RESOLUTION, label="Resolution")
             gemini_veo_aspect = gr.Dropdown(choices=["16:9", "9:16", "1:1"], value=GEMINI_DEFAULT_VEO_ASPECT_RATIO, label="Aspect ratio")
         gemini_veo_reference = gr.Image(label="Optional Veo reference image", type="filepath", sources=["upload"])
+        gemini_veo_reference_state = gr.State(value=None)
+        gemini_veo_reference.change(fn=_persist_uploaded_image, inputs=gemini_veo_reference, outputs=gemini_veo_reference_state)
         gemini_veo_audio = gr.Audio(label="Optional generated audio to use as final audio (Veo does not lip-sync to external WAV)", type="filepath")
         gr.Markdown("For true image + generated-audio conditioning/lip-sync, use LTX-2.5 A2Vid in Tab 5. Gemini Veo can generate the visual clip from the image and then replace its native audio with this WAV.")
         generate_gemini_video_button = gr.Button("Generate / Resume Gemini Veo", variant="primary")
@@ -3106,7 +3138,7 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
     state_outputs = [project_name, book_name, part_number, author_name, project_status, project_output_path, book_type, extracted_text, extraction_status, text_status, ollama_status, section_preview, reference_audio, reference_transcript, progress_status, final_audio, wav_download, mp3_download, audio_progress_bar, poet_image, video_progress_status, final_video_preview, final_video_download, subtitle_download, video_progress_bar, final_video_filename, max_characters, tts_engine, voicestudio_voice, voicebox_profile, voicebox_language, voicebox_model_size, voicebox_engine, sarvam_speaker, sarvam_api_key, fish_reference_id, colab_url, colab_token, device_choice, speech_speed, pause_duration, poetry_line_pause_duration, seed, nfe_steps, create_mp3, sadtalker_directory, sadtalker_environment, preprocess_mode, video_model_size, still_mode, output_resolution, burn_subtitles, subtitle_font, subtitle_font_size, video_transition, video_transition_duration, sadtalker_status, wan_checkpoint, wan_task, wan_prompt, wan_status, wan_size, wan_frame_num, wan_steps, wan_seed, wan_audio_section, ltx_status, ltx_mode, ltx_prompt, ltx_duration, ltx_fps]
     existing_project.change(fn=open_selected_project, inputs=existing_project, outputs=state_outputs).then(fn=refresh_pipeline_status, inputs=project_output_path, outputs=pipeline_status_box, concurrency_id="pipeline_status")
 
-    persist_inputs = [project_output_path, extracted_text, book_type, extraction_status, text_status, ollama_status, section_preview, reference_audio, reference_transcript, poet_image, final_video_filename, max_characters, tts_engine, voicestudio_voice, voicebox_profile, voicebox_language, voicebox_model_size, voicebox_engine, sarvam_speaker, sarvam_api_key, fish_reference_id, colab_url, colab_token, device_choice, speech_speed, pause_duration, poetry_line_pause_duration, seed, nfe_steps, create_mp3, sadtalker_directory, sadtalker_environment, preprocess_mode, video_model_size, still_mode, output_resolution, burn_subtitles, subtitle_font, subtitle_font_size, video_transition, video_transition_duration, wan_checkpoint, wan_task, wan_prompt, wan_size, wan_frame_num, wan_steps, wan_seed, wan_audio_section, ltx_mode, ltx_prompt, ltx_duration, ltx_fps]
+    persist_inputs = [project_output_path, extracted_text, book_type, extraction_status, text_status, ollama_status, section_preview, reference_audio, reference_transcript, poet_image_state, final_video_filename, max_characters, tts_engine, voicestudio_voice, voicebox_profile, voicebox_language, voicebox_model_size, voicebox_engine, sarvam_speaker, sarvam_api_key, fish_reference_id, colab_url, colab_token, device_choice, speech_speed, pause_duration, poetry_line_pause_duration, seed, nfe_steps, create_mp3, sadtalker_directory, sadtalker_environment, preprocess_mode, video_model_size, still_mode, output_resolution, burn_subtitles, subtitle_font, subtitle_font_size, video_transition, video_transition_duration, wan_checkpoint, wan_task, wan_prompt, wan_size, wan_frame_num, wan_steps, wan_seed, wan_audio_section, ltx_mode, ltx_prompt, ltx_duration, ltx_fps]
     project_saved_event = project_event.then(fn=persist_project_tabs, inputs=persist_inputs, outputs=[])
     for ev in (extract_event, clean_event, detect_event, ollama_correct_event, ollama_chapters_event, gemini_correct_event):
         ev.then(fn=persist_project_tabs, inputs=persist_inputs, outputs=[])
@@ -3131,8 +3163,8 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
     resume_video_button.click(fn=request_video_resume, inputs=[], outputs=video_progress_status, concurrency_id="video_controls")
     stop_video_button.click(fn=request_video_stop, inputs=[], outputs=video_progress_status, concurrency_id="video_controls")
 
-    generate_wan_button.click(fn=start_remote_wan_video_generation, inputs=[extracted_text, project_name, book_name, author_name, part_number, poet_image, video_colab_url, video_colab_token, wan_task, wan_checkpoint, wan_prompt, wan_size, wan_frame_num, wan_steps, wan_seed, wan_audio_section, burn_subtitles, output_resolution, subtitle_font, subtitle_font_size, max_clip_minutes], outputs=[wan_status, wan_preview, wan_download], concurrency_limit=1, concurrency_id="video_generation")
-    generate_ltx_button.click(fn=start_remote_ltx_video_generation, inputs=[extracted_text, project_name, book_name, author_name, part_number, poet_image, video_colab_url, video_colab_token, ltx_mode, ltx_prompt, ltx_duration, ltx_fps, ltx_audio, burn_subtitles, output_resolution, subtitle_font, subtitle_font_size, max_clip_minutes], outputs=[ltx_status, ltx_preview, ltx_download], concurrency_limit=1, concurrency_id="video_generation")
+    generate_wan_button.click(fn=start_remote_wan_video_generation, inputs=[extracted_text, project_name, book_name, author_name, part_number, poet_image_state, video_colab_url, video_colab_token, wan_task, wan_checkpoint, wan_prompt, wan_size, wan_frame_num, wan_steps, wan_seed, wan_audio_section, burn_subtitles, output_resolution, subtitle_font, subtitle_font_size, max_clip_minutes], outputs=[wan_status, wan_preview, wan_download], concurrency_limit=1, concurrency_id="video_generation")
+    generate_ltx_button.click(fn=start_remote_ltx_video_generation, inputs=[extracted_text, project_name, book_name, author_name, part_number, poet_image_state, video_colab_url, video_colab_token, ltx_mode, ltx_prompt, ltx_duration, ltx_fps, ltx_audio, burn_subtitles, output_resolution, subtitle_font, subtitle_font_size, max_clip_minutes], outputs=[ltx_status, ltx_preview, ltx_download], concurrency_limit=1, concurrency_id="video_generation")
     register_ltx_worker_button.click(
         fn=register_ltx_worker_from_ui,
         inputs=[ltx_api_url, ltx_api_key],
@@ -3159,7 +3191,7 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
         fn=start_remote_ltx23_video_generation,
         inputs=[
             extracted_text, project_name, book_name, author_name, part_number,
-            poet_image, ltx23_image, ltx23_prompt,
+            poet_image_state, ltx23_image_state, ltx23_prompt,
             ltx23_duration, ltx23_fps, ltx23_width, ltx23_height, ltx23_seed,
             ltx23_audio, ltx23_ref_video, ltx23_workflow,
             ltx23_extra_positive, ltx23_extra_negative, ltx23_cfg,
@@ -3184,7 +3216,7 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
     create_gemini_voice_button.click(fn=_create_gemini_voice_ui, inputs=[reference_audio, gemini_consent_audio, gemini_api_key_audio], outputs=[gemini_voice_id, gemini_voice_status])
     check_gemini_button.click(fn=check_gemini_from_ui, inputs=gemini_api_key, outputs=gemini_status)
     generate_gemini_audio_button.click(fn=start_gemini_audio, inputs=[extracted_text, project_name, book_name, part_number, author_name, book_type, gemini_api_key, gemini_tts_model, gemini_tts_voice, gemini_style_prompt, gemini_tts_chunk_size], outputs=[gemini_audio_status, gemini_audio_download], concurrency_limit=1, concurrency_id="gemini_generation")
-    generate_gemini_video_button.click(fn=start_gemini_video, inputs=[extracted_text, project_name, book_name, part_number, author_name, gemini_api_key, gemini_veo_model, gemini_veo_resolution, gemini_veo_aspect, gemini_veo_prompt, gemini_veo_reference, gemini_veo_audio, burn_subtitles, output_resolution, subtitle_font, subtitle_font_size, max_clip_minutes], outputs=[gemini_video_status, gemini_video_preview, gemini_video_download], concurrency_limit=1, concurrency_id="video_generation")
+    generate_gemini_video_button.click(fn=start_gemini_video, inputs=[extracted_text, project_name, book_name, part_number, author_name, gemini_api_key, gemini_veo_model, gemini_veo_resolution, gemini_veo_aspect, gemini_veo_prompt, gemini_veo_reference_state, gemini_veo_audio, burn_subtitles, output_resolution, subtitle_font, subtitle_font_size, max_clip_minutes], outputs=[gemini_video_status, gemini_video_preview, gemini_video_download], concurrency_limit=1, concurrency_id="video_generation")
 
     # ---- pause / resume / stop on every tab (they act only after the current unit of work) ----
     pause_extract_button.click(fn=_pause_stage("extract"), inputs=[], outputs=extraction_status, concurrency_id="extract_controls")
