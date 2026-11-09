@@ -128,6 +128,14 @@ def register_worker(
     if not key:
         raise ValueError("Enter the API key for this LTX API worker.")
 
+    with _worker_db_lock, closing(_connect()) as db:
+        existing = db.execute(
+            "SELECT id FROM ltx_api_workers WHERE base_url = ?", (base,)
+        ).fetchone()
+        count = db.execute("SELECT COUNT(*) AS n FROM ltx_api_workers").fetchone()["n"]
+    if not existing and count >= MAX_WORKERS:
+        raise ValueError(f"All {MAX_WORKERS} LTX API worker slots are already registered.")
+
     health = requests.get(f"{base}/health", headers=_headers(key), timeout=HEALTH_TIMEOUT)
     _assert_healthy(health)
 
@@ -395,7 +403,9 @@ def generate_ltx_api_video(
         raise FileNotFoundError(f"Audio file not found: {audio_file}")
     if image_file is not None and not image_file.is_file():
         raise FileNotFoundError(f"Reference image not found: {image_file}")
-    if kind == "pose" and video_file is not None and not video_file.is_file():
+    if kind == "pose" and video_file is None:
+        raise ValueError("LTX-2.5 Pose requires a reference video for each job.")
+    if kind == "pose" and not video_file.is_file():
         raise FileNotFoundError(f"Reference video not found: {video_file}")
 
     worker = _wait_for_worker(kind, wait_seconds=min(timeout, 1800), on_status=on_status)
@@ -470,7 +480,7 @@ def generate_ltx_api_video(
             "340:286": {"noise_seed": chosen_seed + 1},
             "340:290": {"cfg": float(max(1.0, min(8.0, float(cfg or 1.0))))},
             "340:315": {"cfg": float(max(1.0, min(8.0, float(cfg or 1.0))))},
-            "341": {"filename_prefix": f"video/F5PdfStudio_LTX23_{int(time.time())}"},
+            "341": {"filename_prefix": f"video/F5PdfStudio_LTX23_{secrets.token_hex(5)}"},
         }
         if str(negative_prompt or "").strip():
             inputs["340:314"] = {"text": str(negative_prompt).strip()}
