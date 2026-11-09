@@ -97,11 +97,6 @@ from remote_colab_service import (
     generate_ltx_remote,
 )
 
-from ltx23_comfyui_service import (
-    DEFAULT_WORKFLOW_PATH,
-    DEFAULT_POSE_WORKFLOW_PATH,
-)
-
 from ltx_api_manager import (
     register_worker as register_ltx_api_worker,
     workers_markdown as ltx_workers_markdown,
@@ -3027,11 +3022,6 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
                     lines=2,
                     placeholder="e.g. blurry, distorted hands, extra fingers, flicker, subtitles, watermark",
                 )
-            ltx23_pose_use_image = gr.Checkbox(
-                value=True,
-                label="Pose workflow: use the reference image as the start frame (identity + studio). "
-                      "Untick to start from the reference video's first frame instead.",
-            )
             ltx23_cfg = gr.Slider(
                 1.0, 4.0, value=1.0, step=0.1,
                 label="Negative prompt strength (CFG, first stage). 1.0 = negative prompt OFF (fastest); raise to 1.5-3 to use it (slower)",
@@ -3177,7 +3167,7 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
             poet_image, ltx23_image, ltx23_prompt,
             ltx23_duration, ltx23_fps, ltx23_width, ltx23_height, ltx23_seed,
             ltx23_audio, ltx23_ref_video, ltx23_workflow,
-            ltx23_extra_positive, ltx23_extra_negative, ltx23_cfg, ltx23_pose_use_image,
+            ltx23_extra_positive, ltx23_extra_negative, ltx23_cfg,
             burn_subtitles, output_resolution, subtitle_font, subtitle_font_size, max_clip_minutes,
         ],
         outputs=[ltx23_status, ltx23_preview, ltx23_download],
