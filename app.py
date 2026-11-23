@@ -3150,7 +3150,6 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
     check_wan_colab_button.click(fn=check_colab_from_ui, inputs=[video_colab_url, video_colab_token], outputs=wan_status)
     check_ltx_colab_button.click(fn=check_colab_from_ui, inputs=[video_colab_url, video_colab_token], outputs=ltx_status)
     check_video_colab_button.click(fn=check_colab_from_ui, inputs=[video_colab_url, video_colab_token], outputs=video_colab_status)
-    colab_url.change(fn=lambda value: value, inputs=colab_url, outputs=video_colab_url)  # same server by default
 
     generate_button.click(fn=start_generation, inputs=[extracted_text, book_type, book_name, part_number, author_name, reference_audio, reference_transcript, project_name, max_characters, tts_engine, voicestudio_voice, voicebox_profile, voicebox_language, voicebox_model_size, voicebox_engine, sarvam_speaker, sarvam_api_key, fish_reference_id, chatterbox_url, chatterbox_model_pack, chatterbox_language, gemini_api_key_audio, gemini_audio_model, gemini_voice_id, colab_url, colab_token, speech_speed, pause_duration, poetry_line_pause_duration, device_choice, seed, nfe_steps, create_mp3, ollama_model], outputs=[progress_status, final_audio, wav_download, mp3_download, audio_progress_bar], concurrency_limit=1, concurrency_id="generation")
     pause_button.click(fn=request_pause, inputs=[], outputs=progress_status, concurrency_id="generation_controls")
