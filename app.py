@@ -38,11 +38,17 @@ from text_service import (
 )
 
 from tts_provider import (
-    SARVAM_SPEAKERS,
     check_voicestudio,
     list_voicestudio_voices,
     check_voicebox,
     list_voicebox_profiles,
+)
+
+from chatterbox_comfy_service import (
+    DEFAULT_COMFYUI_URL,
+    DEFAULT_CHATTERBOX_MODEL_PACK,
+    DEFAULT_CHATTERBOX_LANGUAGE,
+    check_chatterbox_comfyui,
 )
 
 from tts_service import (
@@ -92,7 +98,6 @@ from gemini_service import (
 from remote_colab_service import (
     DEFAULT_COLAB_URL,
     check_colab_server,
-    list_fish_references,
     fish_speech_tts,
     generate_wan_remote,
     generate_ltx_remote,
@@ -1336,6 +1341,9 @@ def start_generation(
     sarvam_speaker,
     sarvam_api_key,
     fish_reference_id,
+    chatterbox_url,
+    chatterbox_model_pack,
+    chatterbox_language,
     gemini_api_key,
     gemini_model,
     gemini_voice_id,
@@ -1356,6 +1364,8 @@ def start_generation(
         )
 
     selected_engine = str(tts_engine or "f5tts").strip().lower()
+    if selected_engine in {"sarvam", "fishspeech"}:
+        selected_engine = "f5tts"
     if selected_engine == "f5tts":
         if not reference_audio:
             raise gr.Error("Upload the reference audio file for F5-Hindi.")
@@ -1369,12 +1379,11 @@ def start_generation(
     elif selected_engine == "voicebox":
         if not str(voicebox_profile or "").strip():
             raise gr.Error("Select a Voicebox voice profile ID.")
-    elif selected_engine == "sarvam":
-        if not str(sarvam_api_key or "").strip():
-            raise gr.Error("Enter the Sarvam API key.")
-    elif selected_engine == "fishspeech":
-        if not str(colab_url or "").strip():
-            raise gr.Error("Enter the Colab server URL for Fish Speech.")
+    elif selected_engine == "chatterbox":
+        if not reference_audio:
+            raise gr.Error("Upload a clean reference voice recording for Chatterbox voice cloning.")
+        if not str(chatterbox_model_pack or "").strip():
+            raise gr.Error("Select the installed Chatterbox Hindi model pack.")
     elif selected_engine == "gemini":
         if not str(gemini_api_key or '').strip() and not os.getenv('GEMINI_API_KEY'):
             raise gr.Error("Enter the Gemini API key.")
@@ -1407,8 +1416,9 @@ def start_generation(
         "voicebox_language": str(voicebox_language or "hi"),
         "voicebox_model_size": str(voicebox_model_size or "0.6B"),
         "voicebox_engine": str(voicebox_engine or "qwen"),
-        "sarvam_speaker": str(sarvam_speaker or "shubh"),
-        "sarvam_api_key": "",  # API keys are never persisted in project JSON.
+        "chatterbox_url": str(chatterbox_url or DEFAULT_COMFYUI_URL),
+        "chatterbox_model_pack": str(chatterbox_model_pack or DEFAULT_CHATTERBOX_MODEL_PACK),
+        "chatterbox_language": str(chatterbox_language or DEFAULT_CHATTERBOX_LANGUAGE),
         "reference_audio": str(reference_audio) if reference_audio else None,
         "reference_transcript": str(reference_transcript),
         "gemini_tts_model": str(gemini_model or ''),
@@ -1561,6 +1571,9 @@ def start_generation(
                 sarvam_api_key=str(sarvam_api_key or ""),
                 sarvam_speaker=str(sarvam_speaker or "shubh"),
                 fish_reference_id=str(fish_reference_id or ""),
+                chatterbox_url=str(chatterbox_url or DEFAULT_COMFYUI_URL),
+                chatterbox_model_pack=str(chatterbox_model_pack or DEFAULT_CHATTERBOX_MODEL_PACK),
+                chatterbox_language=str(chatterbox_language or DEFAULT_CHATTERBOX_LANGUAGE),
                 gemini_api_key=str(gemini_api_key or ""),
                 gemini_model=str(gemini_model or GEMINI_DEFAULT_TTS_MODEL),
                 gemini_voice_id=str(gemini_voice_id or ""),
@@ -2263,18 +2276,11 @@ def check_colab_from_ui(colab_url, colab_token):
     return check_colab_server(colab_url or DEFAULT_COLAB_URL, colab_token or '')
 
 
-def refresh_fish_reference_choices(colab_url, colab_token):
-    try:
-        references = list_fish_references(
-            base_url=colab_url or DEFAULT_COLAB_URL,
-            token=colab_token or "",
-        )
-        if not references:
-            return gr.update(choices=[], value=None), "No Fish Speech reference voices found."
-        preferred = "deven" if "deven" in references else references[0]
-        return gr.update(choices=references, value=preferred), "Fish Speech references: " + ", ".join(references)
-    except Exception as exc:
-        return gr.update(), f"Could not refresh Fish Speech references: {type(exc).__name__}: {exc}"
+def check_chatterbox_from_ui(base_url, model_pack):
+    return check_chatterbox_comfyui(
+        base_url or DEFAULT_COMFYUI_URL,
+        model_pack or DEFAULT_CHATTERBOX_MODEL_PACK,
+    )
 
 
 def start_remote_wan_video_generation(
@@ -2657,16 +2663,14 @@ def _correction_engine_visibility(engine):
 def _audio_engine_visibility(engine):
     engine = str(engine or "f5tts").lower()
     return (
-        gr.update(visible=engine in {"f5tts", "voicestudio"}),
+        gr.update(visible=engine in {"f5tts", "voicestudio", "chatterbox"}),
         gr.update(visible=engine == "f5tts"),
         gr.update(visible=engine == "voicestudio"),
         gr.update(visible=engine == "voicestudio"),
         gr.update(visible=engine == "voicebox"),
         gr.update(visible=engine == "voicebox"),
-        gr.update(visible=engine == "sarvam"),
-        gr.update(visible=engine == "fishspeech"),
+        gr.update(visible=engine == "chatterbox"),
         gr.update(visible=engine == "gemini"),
-        gr.update(visible=engine == "fishspeech"),   # Colab connection: only Fish Speech needs it here
     )
 
 def _video_engine_visibility(engine):
@@ -2821,10 +2825,9 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
         with gr.Row():
             tts_engine = gr.Dropdown(choices=[
                 ("F5-Hindi — local GPU", "f5tts"),
+                ("Chatterbox Hindi — ComfyUI GPU", "chatterbox"),
                 ("VoiceStudio — local API", "voicestudio"),
                 ("Voicebox — local API", "voicebox"),
-                ("Sarvam Bulbul v3 — cloud", "sarvam"),
-                ("Fish Speech — Colab GPU", "fishspeech"),
                 ("Gemini TTS — cloud + replicated voice", "gemini"),
             ], value="f5tts", label="Audio engine")
         with gr.Group(visible=True) as reference_audio_group:
@@ -2849,17 +2852,22 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
                 voicebox_model_size = gr.Dropdown(choices=["0.6B", "1.7B"], value="0.6B", label="Model size")
                 voicebox_engine = gr.Dropdown(choices=["qwen", "qwen_custom_voice", "chatterbox", "chatterbox_turbo", "luxtts", "tada", "kokoro"], value="qwen", allow_custom_value=True, label="Voicebox engine")
 
-        with gr.Group(visible=False) as sarvam_audio_group:
+        with gr.Group(visible=False) as chatterbox_audio_group:
+            gr.Markdown("### Chatterbox Hindi — ComfyUI")
             with gr.Row():
-                sarvam_speaker = gr.Dropdown(choices=SARVAM_SPEAKERS, value="deven", allow_custom_value=True, label="Speaker / cloned voice ID")
-                sarvam_api_key = gr.Textbox(type="password", label="Sarvam API key (not saved)")
+                chatterbox_url = gr.Textbox(value=DEFAULT_COMFYUI_URL, label="ComfyUI API URL")
+                chatterbox_model_pack = gr.Dropdown(choices=[DEFAULT_CHATTERBOX_MODEL_PACK], value=DEFAULT_CHATTERBOX_MODEL_PACK, allow_custom_value=True, label="Chatterbox Hindi model pack")
+                chatterbox_language = gr.Dropdown(choices=[("Hindi", "hi")], value="hi", label="Language")
+            check_chatterbox_button = gr.Button("Check ComfyUI / Chatterbox connection")
+            chatterbox_status = gr.Textbox(label="Chatterbox connection status", lines=4, interactive=False, elem_classes=["status-output"])
+            gr.Markdown("Upload the reference voice recording above. Chatterbox uses it for voice cloning; the transcript field is not required.")
 
-        with gr.Group(visible=False) as fishspeech_audio_group:
-            with gr.Row():
-                fish_reference_id = gr.Dropdown(choices=["deven"], value="deven", allow_custom_value=True, label="Fish Speech reference voice")
-                refresh_fish_references_button = gr.Button("Refresh Fish voices")
-            fish_reference_status = gr.Textbox(label="Fish Speech reference status", value="deven — registered reference voice", interactive=False, lines=2)
-            gr.Markdown("Fish Speech uses the native `reference_id` API. Reference voices can be persisted on Google Drive by the Colab media server.")
+        # Retain legacy project-state fields without exposing the retired providers in the UI.
+        sarvam_speaker = gr.State(value="deven")
+        sarvam_api_key = gr.State(value="")
+        fish_reference_id = gr.State(value="")
+        colab_url = gr.State(value=DEFAULT_COLAB_URL)
+        colab_token = gr.State(value="")
 
         with gr.Group(visible=False) as gemini_audio_group:
             with gr.Row():
@@ -2870,13 +2878,6 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
                 gemini_consent_audio = gr.Audio(label="Voice consent recording (10–30 sec)", type="filepath")
                 create_gemini_voice_button = gr.Button("Create Gemini replicated voice")
             gemini_voice_status = gr.Textbox(label="Gemini voice status", lines=4, interactive=False, elem_classes=["status-output"])
-        with gr.Group(visible=False) as colab_audio_group:
-            gr.Markdown("### Colab media server connection (Fish Speech)")
-            with gr.Row():
-                colab_url = gr.Textbox(value=DEFAULT_COLAB_URL, label="Colab media server URL")
-                colab_token = gr.Textbox(type="password", label="Colab bearer token (not saved)")
-                check_colab_button = gr.Button("Check Colab server")
-            colab_status = gr.Textbox(label="Colab status", lines=5, interactive=False, elem_classes=["status-output"])
         with gr.Row():
             pause_duration = gr.Slider(0, 2000, value=750, step=50, label="Silence between sections (ms)")
             poetry_line_pause_duration = gr.Slider(200, 1200, value=450, step=50, label="Poetry line pause (ms)")
@@ -3129,7 +3130,7 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
     )
     tts_engine.change(
         fn=_audio_engine_visibility, inputs=[tts_engine],
-        outputs=[reference_audio_group, f5tts_audio_group, voicestudio_audio_group, voicestudio_refresh_group, voicebox_audio_group, voicebox_refresh_group, sarvam_audio_group, fishspeech_audio_group, gemini_audio_group, colab_audio_group]
+        outputs=[reference_audio_group, f5tts_audio_group, voicestudio_audio_group, voicestudio_refresh_group, voicebox_audio_group, voicebox_refresh_group, chatterbox_audio_group, gemini_audio_group]
     )
     video_engine.change(
         fn=_video_engine_visibility, inputs=[video_engine],
@@ -3146,14 +3147,13 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
 
     refresh_vs_voices_button.click(fn=refresh_voicestudio_voice_choices, inputs=[], outputs=voicestudio_voice)
     refresh_voicebox_button.click(fn=refresh_voicebox_profile_choices, inputs=[], outputs=voicebox_profile)
-    refresh_fish_references_button.click(fn=refresh_fish_reference_choices, inputs=[colab_url, colab_token], outputs=[fish_reference_id, fish_reference_status])
-    check_colab_button.click(fn=check_colab_from_ui, inputs=[colab_url, colab_token], outputs=colab_status)
+    check_chatterbox_button.click(fn=check_chatterbox_from_ui, inputs=[chatterbox_url, chatterbox_model_pack], outputs=chatterbox_status)
     check_wan_colab_button.click(fn=check_colab_from_ui, inputs=[video_colab_url, video_colab_token], outputs=wan_status)
     check_ltx_colab_button.click(fn=check_colab_from_ui, inputs=[video_colab_url, video_colab_token], outputs=ltx_status)
     check_video_colab_button.click(fn=check_colab_from_ui, inputs=[video_colab_url, video_colab_token], outputs=video_colab_status)
     colab_url.change(fn=lambda value: value, inputs=colab_url, outputs=video_colab_url)  # same server by default
 
-    generate_button.click(fn=start_generation, inputs=[extracted_text, book_type, book_name, part_number, author_name, reference_audio, reference_transcript, project_name, max_characters, tts_engine, voicestudio_voice, voicebox_profile, voicebox_language, voicebox_model_size, voicebox_engine, sarvam_speaker, sarvam_api_key, fish_reference_id, gemini_api_key_audio, gemini_audio_model, gemini_voice_id, colab_url, colab_token, speech_speed, pause_duration, poetry_line_pause_duration, device_choice, seed, nfe_steps, create_mp3, ollama_model], outputs=[progress_status, final_audio, wav_download, mp3_download, audio_progress_bar], concurrency_limit=1, concurrency_id="generation")
+    generate_button.click(fn=start_generation, inputs=[extracted_text, book_type, book_name, part_number, author_name, reference_audio, reference_transcript, project_name, max_characters, tts_engine, voicestudio_voice, voicebox_profile, voicebox_language, voicebox_model_size, voicebox_engine, sarvam_speaker, sarvam_api_key, fish_reference_id, chatterbox_url, chatterbox_model_pack, chatterbox_language, gemini_api_key_audio, gemini_audio_model, gemini_voice_id, colab_url, colab_token, speech_speed, pause_duration, poetry_line_pause_duration, device_choice, seed, nfe_steps, create_mp3, ollama_model], outputs=[progress_status, final_audio, wav_download, mp3_download, audio_progress_bar], concurrency_limit=1, concurrency_id="generation")
     pause_button.click(fn=request_pause, inputs=[], outputs=progress_status, concurrency_id="generation_controls")
     resume_button.click(fn=request_resume, inputs=[], outputs=progress_status, concurrency_id="generation_controls")
     stop_button.click(fn=request_stop, inputs=[], outputs=progress_status, concurrency_id="generation_controls")
