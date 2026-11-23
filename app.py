@@ -1835,12 +1835,12 @@ def _project_state_dict(project_directory):
 def _video_sections(project_directory, corrected_text, maximum_characters=None, book_type=None):
     """The ONE section list used by the audio tools, the video tools and the burned text."""
     text = clean_text(remove_page_markers(corrected_text or ""))
-    stored = pipeline.load_matching_sections(project_directory, text)
-    if stored:
-        return stored
     state = _project_state_dict(project_directory)
     limit = int(maximum_characters or state.get("max_characters") or 1200)
     kind = str(book_type or state.get("book_type") or "Others")
+    # Always go through get_canonical_sections. Its fingerprint includes the
+    # book type, size limit and splitter-version, so old text-only cached
+    # sections cannot bypass updated Poetry/Heading 2 rules.
     sections = pipeline.get_canonical_sections(project_directory, text, kind, limit, split_for_tts)
     pipeline.update_stage(
         project_directory, "sections", "completed", done=len(sections), total=len(sections),
