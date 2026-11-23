@@ -334,7 +334,6 @@ def _service_call_ollama(
             )
             response.raise_for_status()
             output_parts: list[str] = []
-            response_pieces = 0
             final_data: dict[str, Any] = {}
 
             for raw_line in response.iter_lines(decode_unicode=True):
@@ -348,13 +347,10 @@ def _service_call_ollama(
                     raise RuntimeError(str(data["error"]))
                 piece = str(data.get("response") or "")
                 if piece:
+                    # Do not emit token-by-token UI updates. The caller owns
+                    # one document-level progress bar and advances it after
+                    # each correction section is completed.
                     output_parts.append(piece)
-                    response_pieces += 1
-                    if response_pieces == 1 or response_pieces % 8 == 0:
-                        _notify(
-                            progress_callback,
-                            f"Ollama is generating corrected text… ({response_pieces} tokens)",
-                        )
                 if data.get("done") is True:
                     final_data = data
 
@@ -646,7 +642,9 @@ def correct_ocr_chunk(
             "idiom, metre, rhyme or the poet's deliberate language. IMPORTANT: a comma "
             "in the middle of a verse line is normal (it marks a poetic pause/yati) — "
             "never split that line into two lines because of it; the full line, comma "
-            "included, must stay on one line exactly as in the source."
+            "included, must stay on one line exactly as in the source. Preserve any Markdown "
+            "level-2 heading prefix (## ) exactly, keep that heading on its own line, and "
+            "never merge verse lines across it."
         ),
         "Drama": (
             "लेखक की शैली, भाव, अर्थ, वाक्य-विन्यास, पात्रों की बोलचाल, क्षेत्रीय "
