@@ -392,9 +392,9 @@ def _restore_poetry_heading_markers(source: str, corrected: str) -> str:
     never infer headings from ordinary verse text.
     """
     headings = [
-        re.sub(r"^##\\s+", "", line.strip()).strip()
+        re.sub(r"^##\s+", "", line.strip()).strip()
         for line in str(source or "").splitlines()
-        if re.match(r"^\\s*##\\s+\\S", line)
+        if re.match(r"^\s*##\s+\S", line)
     ]
     if not headings:
         return corrected
@@ -402,12 +402,12 @@ def _restore_poetry_heading_markers(source: str, corrected: str) -> str:
     lines = str(corrected or "").splitlines()
     for heading in headings:
         for index, line in enumerate(lines):
-            candidate = re.sub(r"^##\\s+", "", line.strip()).strip()
+            candidate = re.sub(r"^##\s+", "", line.strip()).strip()
             if candidate == heading:
                 lines[index] = f"## {heading}"
                 break
 
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 def _split_text(text: str, maximum: int) -> list[TextChunk]:
