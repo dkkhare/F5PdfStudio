@@ -47,7 +47,13 @@ def check_chatterbox_comfyui(
     required = node.get("input", {}).get("required", {})
     pack_spec = required.get("model_pack_name", [])
     available_packs = pack_spec[0] if pack_spec and isinstance(pack_spec[0], list) else []
-    if available_packs and model_pack not in available_packs:
+    if not available_packs:
+        return (
+            f"ComfyUI and ChatterboxMTLTTS are ready at {base}, but the node "
+            "did not report any installed model packs. Open the Chatterbox node "
+            "in ComfyUI and confirm its Hindi pack is available."
+        )
+    if model_pack not in available_packs:
         return (
             f"ComfyUI and ChatterboxMTLTTS are ready at {base}, but the Hindi "
             f"model pack '{model_pack}' is not currently listed. Available packs: "
@@ -188,7 +194,7 @@ def synthesize_chatterbox_comfyui(
                 raise RuntimeError(f"ComfyUI Chatterbox job failed: {status.get('messages', status)}")
             outputs = history_entry.get("outputs") or {}
             audio_info = _find_audio_output(outputs)
-            if audio_info:
+            if audio_info or status.get("completed") is True:
                 break
         if progress_callback:
             progress_callback("Chatterbox is generating the current section in ComfyUI…", 2, 3)
