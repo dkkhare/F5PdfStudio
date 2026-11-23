@@ -388,6 +388,17 @@ def extract_docx(
             text = block.text.strip()
             block_type = "Word paragraph"
 
+            # Preserve semantic Heading 2 information for downstream poetry
+            # sectioning. Markdown is readable in the editor and survives text
+            # correction; the TTS preparation layer removes the prefix before
+            # synthesis so it is never spoken aloud.
+            if text:
+                style = getattr(block, "style", None)
+                style_name = str(getattr(style, "name", "") or "").strip().casefold()
+                style_id = str(getattr(style, "style_id", "") or "").strip().casefold()
+                if style_name in {"heading 2", "heading2"} or style_id in {"heading2", "heading2char"}:
+                    text = "## " + re.sub(r"^#+\s*", "", text).strip()
+
         elif isinstance(block, Table):
             text = table_to_text(block).strip()
             block_type = "Word table"
