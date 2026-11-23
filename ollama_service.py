@@ -383,6 +383,32 @@ def _normalize_input(text: str) -> str:
     text = re.sub(r"\n{4,}", "\n\n\n", text)
     return text.strip()
 
+def _restore_poetry_heading_markers(source: str, corrected: str) -> str:
+    """Restore Word Heading 2 markers if the proofreader drops Markdown syntax.
+
+    Heading 2 metadata is exported as a leading Markdown level-2 marker.
+    Small local models sometimes remove that marker despite explicit instructions.
+    Restore it only when the original heading text matches a corrected output line;
+    never infer headings from ordinary verse text.
+    """
+    headings = [
+        re.sub(r"^##\\s+", "", line.strip()).strip()
+        for line in str(source or "").splitlines()
+        if re.match(r"^\\s*##\\s+\\S", line)
+    ]
+    if not headings:
+        return corrected
+
+    lines = str(corrected or "").splitlines()
+    for heading in headings:
+        for index, line in enumerate(lines):
+            candidate = re.sub(r"^##\\s+", "", line.strip()).strip()
+            if candidate == heading:
+                lines[index] = f"## {heading}"
+                break
+
+    return "\\n".join(lines)
+
 
 def _split_text(text: str, maximum: int) -> list[TextChunk]:
     """Split on paragraph/sentence boundaries while preserving order."""
@@ -917,6 +943,8 @@ def correct_complete_text(
 
     _notify(progress_callback, "Text correction completed.", len(chunks), len(chunks))
     result = "\n\n".join(part for part in corrected_chunks if part)
+    if str(book_type or "Others").strip().title() == "Poetry":
+        result = _restore_poetry_heading_markers(source, result)
     if str(book_type or "Others").strip().title() == "Drama":
         result = _postprocess_drama_text(result)
 
