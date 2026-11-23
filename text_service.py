@@ -60,14 +60,39 @@ def split_for_tts(
     if not text:
         return []
 
-    # Preserve verse boundaries and group four lines into one logical section.
-    # TTS still synthesizes each line independently and inserts line silence.
+    # Poetry uses a heading-aware, two-verse-line section layout.
+    # Word Heading 2 paragraphs are exported with a Markdown "## " prefix:
+    # each heading is a standalone TTS section, followed by verse sections
+    # containing at most two lines (about 20 seconds of narration).
+    # Blank stanza breaks and the next Heading 2 both close any open section.
     if str(book_type or "Others").strip().casefold() == "poetry":
-        lines = [line.strip() for line in text.splitlines() if line.strip()]
-        return [
-            "\n".join(lines[start:start + 4])
-            for start in range(0, len(lines), 4)
-        ]
+        sections: list[str] = []
+        verse_buffer: list[str] = []
+
+        def flush_verse_buffer() -> None:
+            while verse_buffer:
+                sections.append("\n".join(verse_buffer[:2]))
+                del verse_buffer[:2]
+
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if not line:
+                flush_verse_buffer()
+                continue
+
+            # Only Markdown level-2 headings are treated as Word Heading 2.
+            if re.match(r"^##\s+", line):
+                flush_verse_buffer()
+                sections.append(line)
+                continue
+
+            verse_buffer.append(line)
+            if len(verse_buffer) == 2:
+                sections.append("\n".join(verse_buffer))
+                verse_buffer.clear()
+
+        flush_verse_buffer()
+        return sections
 
     max_characters = max(
         80,
