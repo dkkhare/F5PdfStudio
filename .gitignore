@@ -83,3 +83,9 @@ output*/
 
 # Personal reference images
 poet_portrait.png
+# Runtime uploads
+.runtime_uploads/
+
+# Local inspection exports
+Inspect App Entry Point.html
+Inspect App Entry Point_files/
