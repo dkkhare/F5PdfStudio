@@ -733,7 +733,10 @@ def ollama_correct_text(
 
     progress(0.03, desc="Starting Ollama correction…")
 
-    progress_state = {"pulse": 0.04}
+    # One monotonic progress bar for the entire correction job. The
+    # fraction advances only when a complete text section starts/finishes;
+    # status-only callbacks (validation, retries, pause) never reset or pulse it.
+    progress_state = {"fraction": 0.04}
 
     def update_progress(message, current=None, total=None):
         if current is not None and total:
@@ -742,13 +745,11 @@ def ollama_correct_text(
                 1.0,
             )
             fraction = 0.04 + (0.92 * section_fraction)
-            progress_state["pulse"] = max(progress_state["pulse"], fraction)
-        else:
-            # Streaming Ollama calls report token activity without a known total.
-            progress_state["pulse"] += 0.015
-            if progress_state["pulse"] > 0.90:
-                progress_state["pulse"] = 0.12
-            fraction = progress_state["pulse"]
+            progress_state["fraction"] = max(
+                progress_state["fraction"],
+                fraction,
+            )
+        fraction = progress_state["fraction"]
 
         progress(
             fraction,
@@ -777,7 +778,7 @@ def ollama_correct_text(
             progress_callback=update_progress,
             timeout=180,
             continue_on_error=True,
-            control=lambda: control.checkpoint(lambda message: progress(progress_state["pulse"], desc=message)),
+            control=lambda: control.checkpoint(lambda message: progress(progress_state["fraction"], desc=message)),
             resume_chunks=resume_chunks,
             on_chunk=save_chunk,
         )
