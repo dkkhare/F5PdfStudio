@@ -226,6 +226,9 @@ def open_selected_project(selection):
         f"Book: {state.get('book_name', '')}\nPart: {state.get('part_number', '')}\n"
         f"Author: {state.get('author_name', '')}\nOutput: {state.get('output_directory', '')}"
     )
+    saved_tts_engine = str(state.get("tts_engine", "f5tts") or "f5tts").strip().lower()
+    if saved_tts_engine in {"sarvam", "fishspeech"}:
+        saved_tts_engine = "f5tts"
     return (
         state.get("project_name", selection), state.get("book_name", ""), state.get("part_number", "1"), state.get("author_name", ""),
         project_message, state.get("output_directory", ""), state.get("book_type", "Poetry"), state.get("extracted_text", ""),
@@ -234,7 +237,7 @@ def open_selected_project(selection):
         state.get("reference_transcript") or DEFAULT_REFERENCE_TRANSCRIPT, state.get("audio_status", "Audio not started."), wav_file, wav_file,
         state.get("mp3_file"), float(state.get("audio_progress", 0)), state.get("poet_image"), state.get("video_status", "Video not started."),
         final_video, ([final_video] if final_video else None), state.get("subtitle_file"), float(state.get("video_progress", 0)), state.get("final_video_filename", "poet_reciting_poem_1080p.mp4"),
-        _safe_max_characters(state.get("max_characters", 1200)), state.get("tts_engine", "f5tts"), state.get("voicestudio_voice", "default"),
+        _safe_max_characters(state.get("max_characters", 1200)), saved_tts_engine, state.get("voicestudio_voice", "default"),
         state.get("voicebox_profile", ""), state.get("voicebox_language", "hi"), state.get("voicebox_model_size", "0.6B"), state.get("voicebox_engine", "qwen"),
         state.get("sarvam_speaker", "shubh"), "", state.get("fish_reference_id", ""), state.get("colab_url", DEFAULT_COLAB_URL), "",
         state.get("device_choice", "auto"), float(state.get("speech_speed", 0.95)), int(state.get("pause_duration", 750)), int(state.get("poetry_line_pause_duration", 450)),
