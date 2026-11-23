@@ -177,7 +177,11 @@ def video_section_path(project_dir: Any, index: int) -> Path:
 
 # ======================================================= canonical sections
 def _fingerprint(text: str, book_type: str, max_characters: int) -> str:
-    payload = f"{book_type}|{int(max_characters)}|{text}"
+    # Bump this version whenever sectioning rules change. This invalidates
+    # cached sections produced by older splitters, even when text/settings
+    # are otherwise identical.
+    splitter_version = "heading-aware-poetry-v2"
+    payload = f"{splitter_version}|{book_type}|{int(max_characters)}|{text}"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
