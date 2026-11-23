@@ -64,7 +64,7 @@ def split_for_tts(
     # Word Heading 2 paragraphs are exported with a Markdown "## " prefix:
     # each heading is a standalone TTS section, followed by verse sections
     # containing at most two lines (about 20 seconds of narration).
-    # Blank stanza breaks and the next Heading 2 both close any open section.
+    # DOCX extraction inserts blank separators between Word paragraphs, so ignore blank lines.
     if str(book_type or "Others").strip().casefold() == "poetry":
         sections: list[str] = []
         verse_buffer: list[str] = []
@@ -77,7 +77,6 @@ def split_for_tts(
         for raw_line in text.splitlines():
             line = raw_line.strip()
             if not line:
-                flush_verse_buffer()
                 continue
 
             # Only Markdown level-2 headings are treated as Word Heading 2.
