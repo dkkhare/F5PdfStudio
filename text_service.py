@@ -82,7 +82,8 @@ def split_for_tts(
             # Only Markdown level-2 headings are treated as Word Heading 2.
             if re.match(r"^##\s+", line):
                 flush_verse_buffer()
-                sections.append(line)
+                # Use the marker only for section detection; do not show or speak it.
+                sections.append(re.sub(r"^##\\s+", "", line).strip())
                 continue
 
             verse_buffer.append(line)
