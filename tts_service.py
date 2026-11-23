@@ -31,8 +31,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional, Sequence
 
-from tts_provider import synthesize_sarvam, synthesize_voicestudio, synthesize_voicebox
-from remote_colab_service import fish_speech_tts
+from tts_provider import synthesize_voicestudio, synthesize_voicebox
+from chatterbox_comfy_service import (
+    DEFAULT_CHATTERBOX_MODEL_PACK,
+    DEFAULT_CHATTERBOX_LANGUAGE,
+    DEFAULT_COMFYUI_URL,
+    synthesize_chatterbox_comfyui,
+)
 
 
 SAMPLE_RATE = 24_000
@@ -777,18 +782,24 @@ def _generate_remote_section(
     voicebox_engine: str,
     colab_url: str,
     colab_token: str,
+    chatterbox_url: str,
+    chatterbox_model_pack: str,
+    chatterbox_language: str,
+    reference_audio: str,
     speed: float,
     progress_callback: Optional[Callable[..., Any]],
     inter_batch_pause_ms: int = 120,
 ) -> None:
-    """Generate one section through VoiceStudio or Sarvam and write one WAV."""
+    """Generate one section through a selected provider and write one WAV."""
     import numpy as np
 
     engine = str(provider_engine or "").strip().lower()
-    if engine not in {"voicestudio", "voicebox", "sarvam", "fishspeech", "gemini"}:
+    if engine not in {"voicestudio", "voicebox", "gemini", "chatterbox"}:
         raise ValueError(f"Unsupported remote TTS engine: {provider_engine}")
 
-    chunks = _split_text_for_remote_tts(text, 2400 if engine == "sarvam" else (800 if engine == "gemini" else 1800))
+    chunks = [str(text)] if engine == "chatterbox" else _split_text_for_remote_tts(
+        text, 800 if engine == "gemini" else 1800
+    )
     if not chunks:
         raise ValueError("Section text is empty after cleanup.")
 
@@ -799,14 +810,15 @@ def _generate_remote_section(
         _notify(progress_callback, f"Generating {engine} audio batch {number}/{len(chunks)}…", number - 1, len(chunks))
         temporary = output_path.with_suffix(f".remote_{number:04d}.wav")
         try:
-            if engine == "sarvam":
-                synthesize_sarvam(
+            if engine == "chatterbox":
+                synthesize_chatterbox_comfyui(
                     chunk,
                     temporary,
-                    api_key=sarvam_api_key,
-                    speaker=sarvam_speaker,
-                    language_code="hi-IN",
-                    pace=float(speed),
+                    reference_audio,
+                    base_url=chatterbox_url or DEFAULT_COMFYUI_URL,
+                    model_pack=chatterbox_model_pack or DEFAULT_CHATTERBOX_MODEL_PACK,
+                    language=chatterbox_language or DEFAULT_CHATTERBOX_LANGUAGE,
+                    progress_callback=progress_callback,
                 )
             elif engine == "voicestudio":
                 synthesize_voicestudio(
@@ -833,14 +845,7 @@ def _generate_remote_section(
                     style_prompt="Natural Hindi audiobook narration. Clear Hindi diction, warm, expressive, steady pace.",
                 )
             else:
-                fish_speech_tts(
-                    base_url=colab_url,
-                    token=colab_token,
-                    text=chunk,
-                    output_path=temporary,
-                    reference_id=fish_reference_id,
-                    language="hi",
-                )
+                raise ValueError(f"Unsupported remote TTS engine: {engine}")
             with wave.open(str(temporary), "rb") as handle:
                 if handle.getnchannels() != 1 or handle.getsampwidth() != 2:
                     raise RuntimeError(f"Remote TTS returned unsupported WAV format: {temporary}")
@@ -919,6 +924,9 @@ def generate_audiobook(
     voicebox_engine = str(kwargs.get("voicebox_engine") or "qwen").strip()
     colab_url = str(kwargs.get("colab_url") or "").strip()
     colab_token = str(kwargs.get("colab_token") or "").strip()
+    chatterbox_url = str(kwargs.get("chatterbox_url") or DEFAULT_COMFYUI_URL).strip()
+    chatterbox_model_pack = str(kwargs.get("chatterbox_model_pack") or DEFAULT_CHATTERBOX_MODEL_PACK).strip()
+    chatterbox_language = str(kwargs.get("chatterbox_language") or DEFAULT_CHATTERBOX_LANGUAGE).strip()
 
     normalised = _normalise_sections(sections)
     if not normalised:
@@ -930,10 +938,12 @@ def generate_audiobook(
         "\n\n".join(str(item.get("text") or "") for item in normalised).encode("utf-8")
     ).hexdigest()
     ref_path = _resolve_path(reference_audio)
-    if provider_engine == "f5tts":
+    if provider_engine in {"f5tts", "chatterbox"}:
         if not ref_path or not ref_path.exists():
-            raise FileNotFoundError("Upload a valid reference-audio WAV file for F5-Hindi.")
-        reference_text = prepare_text_for_tts(reference_text or DEFAULT_REFERENCE_TEXT)
+            label = "Chatterbox" if provider_engine == "chatterbox" else "F5-Hindi"
+            raise FileNotFoundError(f"Upload a valid reference-audio file for {label} voice cloning.")
+        if provider_engine == "f5tts":
+            reference_text = prepare_text_for_tts(reference_text or DEFAULT_REFERENCE_TEXT)
     else:
         reference_text = prepare_text_for_tts(reference_text or "")
 
@@ -956,12 +966,10 @@ def generate_audiobook(
         current_voice = voicestudio_voice
     elif provider_engine == "voicebox":
         current_voice = f"{voicebox_profile}|{voicebox_language}|{voicebox_model_size}|{voicebox_engine}"
-    elif provider_engine == "fishspeech":
-        current_voice = fish_reference_id
+    elif provider_engine == "chatterbox":
+        current_voice = f"{chatterbox_model_pack}|{chatterbox_language}|{ref_path}"
     elif provider_engine == "gemini":
         current_voice = f"{gemini_model}|{gemini_voice_id}"
-    else:
-        current_voice = sarvam_speaker
     if previous and (previous_engine != provider_engine or previous_voice != current_voice.lower()):
         previous = {}
     if previous and str(previous.get("sections_fingerprint") or "") != sections_fingerprint:
@@ -990,7 +998,7 @@ def generate_audiobook(
         "output_dir": str(destination),
         "provider_engine": provider_engine,
         "provider_voice": current_voice,
-        "model": DEFAULT_MODEL_REPO if provider_engine == "f5tts" else ("voice-studio-local" if provider_engine == "voicestudio" else ("fish-speech-colab" if provider_engine == "fishspeech" else (gemini_model if provider_engine == "gemini" else "bulbul:v3"))),
+        "model": (DEFAULT_MODEL_REPO if provider_engine == "f5tts" else "ComfyUI-Chatterbox" if provider_engine == "chatterbox" else "voice-studio-local" if provider_engine == "voicestudio" else "voicebox-local" if provider_engine == "voicebox" else gemini_model if provider_engine == "gemini" else provider_engine),
     }
     _save_checkpoint(checkpoint, checkpoint_state)
 
@@ -1052,6 +1060,10 @@ def generate_audiobook(
                         voicebox_engine=voicebox_engine,
                         colab_url=colab_url,
                         colab_token=colab_token,
+                        chatterbox_url=chatterbox_url,
+                        chatterbox_model_pack=chatterbox_model_pack,
+                        chatterbox_language=chatterbox_language,
+                        reference_audio=str(ref_path) if ref_path else "",
                         speed=float(speed),
                         progress_callback=progress_callback,
                         inter_batch_pause_ms=int(inter_batch_pause_ms),
