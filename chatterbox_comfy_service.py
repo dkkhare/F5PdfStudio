@@ -46,12 +46,18 @@ def check_chatterbox_comfyui(
 
     required = node.get("input", {}).get("required", {})
     pack_spec = required.get("model_pack_name", [])
-    available_packs = pack_spec[0] if pack_spec and isinstance(pack_spec[0], list) else []
+    # ComfyUI /object_info represents COMBO inputs as:
+    # ["COMBO", {"default": "...", "options": [...]}].
+    # Older/custom nodes may expose a direct list instead.
+    available_packs = []
+    if isinstance(pack_spec, list) and len(pack_spec) > 1 and isinstance(pack_spec[1], dict):
+        available_packs = pack_spec[1].get("options") or []
+    elif isinstance(pack_spec, list) and pack_spec and isinstance(pack_spec[0], list):
+        available_packs = pack_spec[0]
     if not available_packs:
         return (
-            f"ComfyUI and ChatterboxMTLTTS are ready at {base}, but the node "
-            "did not report any installed model packs. Open the Chatterbox node "
-            "in ComfyUI and confirm its Hindi pack is available."
+            f"ComfyUI and ChatterboxMTLTTS are ready at {base}, but the "
+            "model_pack_name input did not expose any selectable options in /object_info."
         )
     if model_pack not in available_packs:
         return (
