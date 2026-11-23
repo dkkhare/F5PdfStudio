@@ -83,7 +83,7 @@ def split_for_tts(
             if re.match(r"^##\s+", line):
                 flush_verse_buffer()
                 # Use the marker only for section detection; do not show or speak it.
-                sections.append(re.sub(r"^##\\s+", "", line).strip())
+                sections.append(re.sub(r"^##\s+", "", line).strip())
                 continue
 
             verse_buffer.append(line)
