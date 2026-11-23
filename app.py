@@ -98,7 +98,6 @@ from gemini_service import (
 from remote_colab_service import (
     DEFAULT_COLAB_URL,
     check_colab_server,
-    fish_speech_tts,
     generate_wan_remote,
     generate_ltx_remote,
 )
