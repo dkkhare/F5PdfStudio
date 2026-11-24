@@ -924,7 +924,24 @@ def run_video_stage(
     signature = video_signature(engine, sections, settings, audio_files)
     previous = _read_json(checkpoint_file)
     completed: dict[int, dict] = {}
-    if previous.get("signature") == signature:
+    previous_settings = previous.get("settings") or {}
+
+    def _without_kvideo_duration_overrides(value: dict) -> dict:
+        # kVideo duration controls moved back into the uploaded ComfyUI workflow.
+        # This compatibility comparison lets a checkpoint survive that change,
+        # while still requiring the same project, section count and all other settings.
+        ignored = {"extra_seconds", "max_seconds", "audio_piece_seconds"}
+        return {key: item for key, item in value.items() if key not in ignored}
+
+    legacy_kvideo_checkpoint_compatible = (
+        engine == "kvideo_ltx_audio"
+        and previous.get("engine") == engine
+        and int(previous.get("total_sections") or -1) == total
+        and bool(previous_settings)
+        and _without_kvideo_duration_overrides(previous_settings)
+            == _without_kvideo_duration_overrides(settings)
+    )
+    if previous.get("signature") == signature or legacy_kvideo_checkpoint_compatible:
         for key, entry in (previous.get("sections") or {}).items():
             if str(key).isdigit() and isinstance(entry, dict):
                 section_index = int(key)
