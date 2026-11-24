@@ -926,8 +926,77 @@ def run_video_stage(
     completed: dict[int, dict] = {}
     if previous.get("signature") == signature:
         for key, entry in (previous.get("sections") or {}).items():
-            if str(key).isdigit() and Path(str(entry.get("path", ""))).is_file():
-                completed[int(key)] = entry
+            if str(key).isdigit() and isinstance(entry, dict):
+                section_index = int(key)
+                expected_path = video_section_path(directory, section_index)
+                if expected_path.is_file():
+                    try:
+                        media = probe_media(expected_path)
+                        if media.get("has_video") and float(media.get("duration") or 0) > 0:
+                            restored = dict(entry)
+                            restored.update({
+                                "path": str(expected_path),
+                                "duration": float(media["duration"]),
+                                "engine": engine,
+                            })
+                            completed[section_index] = restored
+                    except Exception:
+                        # A partial/corrupt MP4 must be regenerated, not skipped.
+                        pass
+
+        # Recover a fully rendered MP4 if the process disconnected after
+        # finalizing the section but before its checkpoint was written.
+        # The signature gate above ensures we only reuse videos made from the
+        # same text, audio, engine and generation settings.
+        recovered = []
+        for section_index in range(1, total + 1):
+            if section_index in completed:
+                continue
+            expected_path = video_section_path(directory, section_index)
+            if not expected_path.is_file() or expected_path.stat().st_size < 1000:
+                continue
+            try:
+                media = probe_media(expected_path)
+                if not media.get("has_video") or float(media.get("duration") or 0) <= 0:
+                    continue
+                completed[section_index] = {
+                    "path": str(expected_path),
+                    "duration": float(media["duration"]),
+                    "burned": bool(burn),
+                    "pages": len(paginate_text(
+                        sections[section_index - 1],
+                        layout_for(width, height, font_size)[0],
+                        layout_for(width, height, font_size)[1],
+                        preserve_lines=poetry,
+                    )) if burn else 0,
+                    "engine": engine,
+                }
+                recovered.append(section_index)
+            except Exception:
+                # Ignore incomplete MP4s; the normal generation loop will replace them.
+                continue
+
+        if recovered:
+            _atomic_json(checkpoint_file, {
+                **previous,
+                "signature": signature,
+                "sections": {str(k): v for k, v in sorted(completed.items())},
+                "completed_sections": sorted(completed),
+                "last_completed_section": max(completed) if completed else 0,
+                "total_sections": total,
+                "status": "running",
+                "updated": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "recovered_after_interruption": recovered,
+            })
+            say_recovery = (
+                "Recovered completed video section(s) after interruption: "
+                + ", ".join(str(value) for value in recovered)
+            )
+            if notify:
+                try:
+                    notify(say_recovery, len(completed), total)
+                except TypeError:
+                    notify(say_recovery)
 
     def save(status: str, extra: Optional[dict] = None) -> dict:
         state = {
