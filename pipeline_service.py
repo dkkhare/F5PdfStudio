@@ -476,11 +476,11 @@ def paginate_text(text: str, max_chars: int = 36, max_lines: int = 3, preserve_l
             line = re.sub(r"[ \t]+", " ", line).strip()
             if line:
                 lines.extend(_wrap_words(line, max_chars) or [line])
-        limit = max(max_lines, 6) if len(lines) <= 6 else max_lines
     else:
         flat = re.sub(r"\s+", " ", raw).strip()
         lines = _wrap_words(flat, max_chars)
-        limit = max_lines
+    # Every subtitle page is limited to two lines.
+    limit = 2
     pages = ["\n".join(lines[i:i + limit]) for i in range(0, len(lines), limit)]
     return [page for page in pages if page.strip()]
 
@@ -531,6 +531,7 @@ def finalize_section_video(
     font_name: str = "Nirmala UI",
     font_size: int = 28,
     poetry: bool = False,
+    center_text: bool = False,
     work_dir: Any = None,
     preset: str = "medium",
 ) -> dict:
@@ -574,7 +575,7 @@ def finalize_section_video(
             style = (
                 f"FontName={font_name},FontSize={int(font_size)},"
                 "PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,"
-                "BorderStyle=1,Outline=2,Shadow=1,Alignment=2,MarginV=42"
+                "BorderStyle=1,Outline=2,Shadow=1," + ("Alignment=5,MarginV=0" if center_text else "Alignment=2,MarginV=42")
             )
             filters.append(f"subtitles=filename='{srt_file.name}':force_style='{style}'")
         else:
@@ -797,6 +798,42 @@ def generate_in_pieces(
             pass
 
 
+def _looks_like_poem_title(text: str) -> bool:
+    """Conservative title heuristic: short, heading-like first section only."""
+    value = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not value or len(value) > 72 or len(value.split()) > 12:
+        return False
+    if len([line for line in str(text).splitlines() if line.strip()]) > 2:
+        return False
+    if re.search(r"[।.!?]$", value):
+        return False
+    return True
+
+
+def _create_orange_title_video(audio: Path, title: str, destination: Path,
+                               width: int, height: int, fps: int, work_dir: Path) -> Path:
+    """Create an orange title-card source with the original audio."""
+    duration = max(3.0, probe_media(audio)["duration"])
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    work_dir.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(destination.stem + ".tmp.mp4")
+    command = [
+        _ffmpeg(), "-y", "-hide_banner", "-loglevel", "error",
+        "-f", "lavfi", "-i",
+        f"color=c=0xF28C28:s={int(width)}x{int(height)}:r={int(fps)}:d={duration:.3f}",
+        "-i", str(audio), "-map", "0:v:0", "-map", "1:a:0",
+        "-af", "apad", "-t", f"{duration:.3f}",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+        "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
+        "-ar", "48000", "-ac", "2", "-movflags", "+faststart", str(temporary),
+    ]
+    completed = subprocess.run(command, capture_output=True, text=True, cwd=str(work_dir))
+    if completed.returncode != 0:
+        raise RuntimeError(f"Could not create orange poem-title video:\\n{completed.stderr[-1200:]}")
+    temporary.replace(destination)
+    return destination
+
+
 # ====================================================== the video stage runner
 def _file_fingerprint(path: Any) -> str:
     if not path:
@@ -879,6 +916,11 @@ def run_video_stage(
     settings = dict(settings)
     settings.update({"burn": bool(burn), "width": int(width), "height": int(height), "font": font_name,
                      "font_size": int(font_size), "mux_audio": bool(mux_audio)})
+    title_intro_index = (
+        1 if audio_files and audio_files[0] and _looks_like_poem_title(sections[0])
+        and probe_media(audio_files[0])["duration"] <= 6.0 else None
+    )
+    settings["poem_title_intro_index"] = title_intro_index
     signature = video_signature(engine, sections, settings, audio_files)
     previous = _read_json(checkpoint_file)
     completed: dict[int, dict] = {}
@@ -934,9 +976,16 @@ def run_video_stage(
             raw = work_dir / f"{destination.stem}_raw.mp4"
             if raw.exists():
                 raw.unlink()
-            say(f"{engine}: generating section {index}/{total} ({destination.name})", len(completed))
+            is_title_intro = index == title_intro_index
+            say(
+                ("Creating orange poem-title intro" if is_title_intro else f"{engine}: generating section {index}/{total}")
+                + f" ({destination.name})", len(completed)
+            )
             try:
-                generator(index, str(text), raw, audio)
+                if is_title_intro:
+                    _create_orange_title_video(audio, str(text), raw, width, height, fps, work_dir)
+                else:
+                    generator(index, str(text), raw, audio)
                 if not raw.is_file() or raw.stat().st_size < 1000:
                     raise RuntimeError(f"{engine} finished section {index} but no usable MP4 was created.")
                 if destination.is_file():  # keep the previous version when another engine redoes the section
@@ -944,9 +993,11 @@ def run_video_stage(
                     destination.replace(previous_dir / f"{destination.stem}_{time.strftime('%Y%m%d_%H%M%S')}.mp4")
                 say(f"Burning the section text on {destination.name}…", len(completed))
                 result = finalize_section_video(
-                    raw, destination, text, audio_path=audio, mux_audio=mux_audio, burn=burn,
+                    raw, destination, text, audio_path=None if is_title_intro else audio,
+                    mux_audio=False if is_title_intro else mux_audio,
+                    burn=bool(burn and not is_title_intro),
                     width=width, height=height, fps=fps, font_name=font_name, font_size=font_size,
-                    poetry=poetry, work_dir=work_dir,
+                    poetry=poetry, center_text=is_title_intro, work_dir=work_dir,
                 )
             except stop_exceptions:
                 raise
