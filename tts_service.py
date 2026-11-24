@@ -722,6 +722,26 @@ def _save_checkpoint(path: Path, data: dict[str, Any]) -> None:
     temporary.replace(path)
 
 
+def _is_complete_wav(path: Path) -> bool:
+    """Return True only for a readable, non-empty WAV file.
+
+    This also recovers a section whose WAV was fully written immediately
+    before a disconnect prevented the checkpoint JSON from being updated.
+    """
+    if not path.is_file():
+        return False
+    try:
+        with wave.open(str(path), "rb") as audio:
+            return (
+                audio.getnchannels() > 0
+                and audio.getframerate() > 0
+                and audio.getsampwidth() > 0
+                and audio.getnframes() > 0
+            )
+    except (OSError, EOFError, wave.Error):
+        return False
+
+
 def combine_wav_files(
     files: Iterable[str | Path],
     output_path: str | Path,
@@ -1090,6 +1110,25 @@ def generate_audiobook(
         for value in previous.get("completed_sections", [])
         if str(value).isdigit()
     }
+
+    # Recover fully written section WAVs when a disconnect happened after
+    # audio was saved but before its completed_sections checkpoint was flushed.
+    # This recovery is intentionally allowed only after the checkpoint's
+    # engine, voice/settings and exact text fingerprint have been validated.
+    if resume and previous:
+        recovered = []
+        for ordinal in range(1, len(normalised) + 1):
+            section_file = _pipeline.audio_section_path(destination, ordinal)
+            if ordinal not in completed and _is_complete_wav(section_file):
+                completed.add(ordinal)
+                recovered.append(ordinal)
+        if recovered:
+            _notify(
+                progress_callback,
+                "Recovered completed audio sections after the previous interruption: "
+                + ", ".join(str(value) for value in recovered),
+            )
+
     section_files: list[str] = []
     total = len(normalised)
     stopped = False
