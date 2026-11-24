@@ -52,7 +52,7 @@ def check_server(server: str, api_key: str = "", timeout: int = 15) -> str:
         raise ValueError("Enter the kVideo API URL.")
     session = _session(api_key)
     errors = []
-    for endpoint in ("/system_stats", "/queue", "/"):
+    for endpoint in ("/system_stats", "/queue"):
         try:
             response = session.get(base + endpoint, timeout=timeout)
             if response.status_code in (401, 403):
