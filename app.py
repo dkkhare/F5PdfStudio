@@ -111,46 +111,93 @@ from ltx_api_manager import (
 
 
 
+from kvideo_client import check_server as check_kvideo_server, generate as generate_kvideo
+
+
 def check_kvideo_server_from_ui(api_url, api_key):
-    """Basic reachability check for a kVideo base URL; does not assume a render API."""
-    import urllib.error
-    import urllib.request
-
-    base = str(api_url or "").strip().rstrip("/")
-    if not base:
-        return "Enter the kVideo API URL first."
-    headers = {"Accept": "application/json"}
-    if str(api_key or "").strip():
-        headers["Authorization"] = f"Bearer {str(api_key).strip()}"
-    checks = [base + "/health", base]
-    errors = []
-    for url in checks:
-        request = urllib.request.Request(url, headers=headers, method="GET")
-        try:
-            with urllib.request.urlopen(request, timeout=15) as response:
-                body = response.read(2000).decode("utf-8", errors="replace")
-                return (f"kVideo server reachable.\\nURL: {url}\\nHTTP: {response.status}"
-                        + (f"\\nResponse: {body}" if body else ""))
-        except urllib.error.HTTPError as exc:
-            errors.append(f"{url} -> HTTP {exc.code}: {exc.reason}")
-            if exc.code in (401, 403):
-                return ("kVideo server is reachable, but authentication was rejected. "
-                        f"Check the API key.\\n{url} -> HTTP {exc.code}")
-        except Exception as exc:
-            errors.append(f"{url} -> {type(exc).__name__}: {exc}")
-    return "Could not verify the kVideo server.\\n" + "\\n".join(errors)
+    try:
+        return check_kvideo_server(api_url, api_key)
+    except Exception as exc:
+        return f"kVideo connection failed: {type(exc).__name__}: {exc}"
 
 
-def start_kvideo_video_generation(*args):
-    """Fail clearly until the provider's actual render API contract is configured."""
-    raise gr.Error(
-        "kVideo video generation is not connected yet. The current project only has "
-        "the API URL, API key, and workflow fields; it does not define the render "
-        "request endpoint/payload, job-status polling response, or output-download "
-        "contract. The Check kVideo Server button can verify basic reachability, "
-        "but production cannot safely start until the kVideo API documentation or "
-        "a working request/response example is supplied."
+def start_kvideo_video_generation(
+    api_url, api_key, workflow_file, corrected_text, project_name, book_name, part_number,
+    author_name, poet_image, burn_text=True, output_resolution="1920x1080",
+    subtitle_font="Nirmala UI", subtitle_font_size=28, max_clip_minutes=10.0,
+):
+    """Generate section videos with the uploaded ComfyUI API workflow and resume by checkpoint."""
+    if not str(api_url or "").strip():
+        raise gr.Error("Enter the kVideo API URL.")
+    if not str(project_name or "").strip() or not str(book_name or "").strip() or not str(part_number or "").strip():
+        raise gr.Error("Open/create a project with its project name, book name and part number first.")
+    if not workflow_file or not Path(str(workflow_file)).is_file():
+        raise gr.Error("Upload the ComfyUI API workflow JSON (Workflow > Export (API)).")
+    if not poet_image or not Path(str(poet_image)).is_file():
+        raise gr.Error("Upload the reference portrait/image used by the workflow.")
+    _message, project_dir_text = open_or_create_project(project_name, book_name, part_number, author_name)
+    project_dir = Path(project_dir_text)
+    sections = _video_sections(project_dir, corrected_text)
+    if not sections:
+        raise gr.Error("No video sections could be prepared.")
+    audio_paths = [_project_audio_section(project_dir, number) for number in range(1, len(sections) + 1)]
+    missing = [number for number, path in enumerate(audio_paths, 1) if not path or not Path(path).is_file()]
+    if missing:
+        raise gr.Error(f"Generate the audiobook first. Missing section audio: {missing[:10]}.")
+
+    image_copy = _copy_project_asset(poet_image, project_dir, "kvideo_reference_image")
+    workflow_copy = _copy_project_asset(workflow_file, project_dir, "kvideo_api_workflow")
+    workflow_digest = hashlib.sha256(Path(workflow_copy).read_bytes()).hexdigest()
+    image_digest = hashlib.sha256(Path(image_copy).read_bytes()).hexdigest()
+    api_base = str(api_url).strip().rstrip("/")
+    settings = {
+        "api_url": api_base,
+        "workflow_name": Path(workflow_copy).name,
+        "workflow_sha256": workflow_digest,
+        "image": image_copy,
+        "image_sha256": image_digest,
+        "extra_seconds": 2.0,
+        "max_seconds": 9.6,
+        "audio_piece_seconds": 7.6,
+    }
+    base_prompt = (
+        "Create a realistic audio-conditioned video. Preserve the identity, face, clothing and "
+        "appearance of the reference image. Match natural facial and body movement to the supplied "
+        "audio, with accurate lip synchronization. Avoid exaggerated movement, camera cuts and identity drift. "
     )
+
+    def generate_piece(piece_number, piece_count, output_path, piece_audio, seconds):
+        section_prompt = base_prompt + "Scene context: " + str(current_section_text[0])[:2500]
+        return generate_kvideo(
+            api_base, workflow_copy, image_copy, piece_audio, output_path,
+            extra_seconds=2.0, max_seconds=9.6, prompt=section_prompt,
+            timeout=3600, api_key=api_key or "",
+        )
+
+    current_section_text = [""]
+    def generate_one(index, section_text, destination, audio_file):
+        current_section_text[0] = str(section_text or "")
+        pipeline.generate_in_pieces(
+            generate_piece, destination, Path(audio_file), 7.6,
+            destination.parent, destination.stem,
+        )
+
+    engine_name = "kvideo_ltx_audio"
+    def runner(notify):
+        return _remote_video_sections(
+            engine=engine_name, project_dir=project_dir, sections=sections, settings=settings,
+            generator=generate_one, mux_audio=False, require_audio=True, burn=burn_text,
+            resolution=output_resolution, font_name=subtitle_font, font_size=subtitle_font_size,
+            max_clip_minutes=max_clip_minutes, notify=notify,
+        )
+
+    def finalize(result):
+        preview, downloads = _video_outputs(result)
+        status = _video_status_text("kVideo (ComfyUI API)", result)
+        save_project_state(project_dir, {"kvideo_video": preview, "kvideo_status": status})
+        return status, preview, downloads
+
+    yield from _live_video_job("kVideo (ComfyUI API)", runner, finalize)
 
 
 def refresh_voicestudio_voice_choices():
@@ -3116,35 +3163,22 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
 
         with gr.Group(visible=False) as kvideo_group:
             gr.Markdown(
-                "## kVideo — API video provider\\n"
-                "Enter the server URL, API key, and workflow. Check server reachability before starting. "
-                "The render action will require the provider's documented job API contract."
+                "## kVideo — LTX image + audio workflow (ComfyUI API)\n"
+                "Enter the ComfyUI server URL and optional bearer API key, then upload the workflow exported with "
+                "Workflow > Export (API). The workflow must contain LoadImage, LoadAudio, AudioPadToVideoLength, "
+                "LTXVConditioning, and SaveVideo nodes. Each audio section is split into safe 7.6-second pieces "
+                "and rendered with 2 seconds of tail padding (9.6-second workflow limit)."
             )
             with gr.Row():
-                kvideo_api = gr.Textbox(
-                    label="kVideo API URL",
-                    placeholder="",
-                )
-                kvideo_api_key = gr.Textbox(
-                    label="kVideo API Key",
-                    type="password",
-                    placeholder="",
-                )
-            kvideo_workflow = gr.Textbox(
-                label="kVideo workflow",
-                placeholder="",
-                lines=2,
-            )
+                kvideo_api = gr.Textbox(label="kVideo API URL", placeholder="https://your-comfyui-tunnel.trycloudflare.com")
+                kvideo_api_key = gr.Textbox(label="kVideo API Key (Bearer; optional)", type="password")
+            kvideo_workflow = gr.File(label="kVideo workflow JSON (Export API)", file_count="single", type="filepath", file_types=[".json"])
             with gr.Row():
                 check_kvideo_button = gr.Button("Check kVideo Server")
                 generate_kvideo_button = gr.Button("Start / Resume kVideo Video Production", variant="primary")
-            kvideo_status = gr.Textbox(
-                label="kVideo server / production status",
-                value="Enter API URL, API key, and workflow, then click Check kVideo Server.",
-                interactive=False,
-                lines=6,
-                elem_classes=["status-output"],
-            )
+            kvideo_status = gr.Textbox(label="kVideo production status", value="Enter the API URL, upload the API workflow JSON, then check the server.", interactive=False, lines=8, elem_classes=["status-output"])
+            kvideo_preview = gr.Video(label="kVideo combined video preview")
+            kvideo_download = gr.File(label="kVideo combined clips / section videos", file_count="multiple")
 
         with gr.Group(visible=False) as ltx_video_group:
             gr.Markdown("## LTX-2.5 — Colab option")
@@ -3341,7 +3375,12 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
     stop_button.click(fn=request_stop, inputs=[], outputs=progress_status, concurrency_id="generation_controls")
 
     check_kvideo_button.click(fn=check_kvideo_server_from_ui, inputs=[kvideo_api, kvideo_api_key], outputs=kvideo_status)
-    generate_kvideo_button.click(fn=start_kvideo_video_generation, inputs=[kvideo_api, kvideo_api_key, kvideo_workflow, extracted_text, project_name, book_name, part_number, author_name, poet_image_state], outputs=kvideo_status, concurrency_limit=1, concurrency_id="video_generation")
+    generate_kvideo_button.click(
+        fn=start_kvideo_video_generation,
+        inputs=[kvideo_api, kvideo_api_key, kvideo_workflow, extracted_text, project_name, book_name, part_number, author_name, poet_image_state, burn_subtitles, output_resolution, subtitle_font, subtitle_font_size, max_clip_minutes],
+        outputs=[kvideo_status, kvideo_preview, kvideo_download],
+        concurrency_limit=1, concurrency_id="video_generation",
+    )
 
     check_sadtalker_button.click(fn=check_sadtalker_from_ui, inputs=[sadtalker_directory, sadtalker_environment], outputs=sadtalker_status)
     generate_video_button.click(fn=start_video_generation, inputs=[extracted_text, project_name, max_characters, book_type, poet_image_state, sadtalker_directory, sadtalker_environment, preprocess_mode, video_model_size, still_mode, burn_subtitles, subtitle_font, subtitle_font_size, output_resolution, ollama_model, video_transition, video_transition_duration, book_name, author_name, part_number, final_video_filename, max_clip_minutes], outputs=[video_progress_status, final_video_preview, final_video_download, subtitle_download, video_progress_bar], concurrency_limit=1, concurrency_id="video_generation")
