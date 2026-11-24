@@ -110,6 +110,49 @@ from ltx_api_manager import (
 )
 
 
+
+def check_kvideo_server_from_ui(api_url, api_key):
+    """Basic reachability check for a kVideo base URL; does not assume a render API."""
+    import urllib.error
+    import urllib.request
+
+    base = str(api_url or "").strip().rstrip("/")
+    if not base:
+        return "Enter the kVideo API URL first."
+    headers = {"Accept": "application/json"}
+    if str(api_key or "").strip():
+        headers["Authorization"] = f"Bearer {str(api_key).strip()}"
+    checks = [base + "/health", base]
+    errors = []
+    for url in checks:
+        request = urllib.request.Request(url, headers=headers, method="GET")
+        try:
+            with urllib.request.urlopen(request, timeout=15) as response:
+                body = response.read(2000).decode("utf-8", errors="replace")
+                return (f"kVideo server reachable.\\nURL: {url}\\nHTTP: {response.status}"
+                        + (f"\\nResponse: {body}" if body else ""))
+        except urllib.error.HTTPError as exc:
+            errors.append(f"{url} -> HTTP {exc.code}: {exc.reason}")
+            if exc.code in (401, 403):
+                return ("kVideo server is reachable, but authentication was rejected. "
+                        f"Check the API key.\\n{url} -> HTTP {exc.code}")
+        except Exception as exc:
+            errors.append(f"{url} -> {type(exc).__name__}: {exc}")
+    return "Could not verify the kVideo server.\\n" + "\\n".join(errors)
+
+
+def start_kvideo_video_generation(*args):
+    """Fail clearly until the provider's actual render API contract is configured."""
+    raise gr.Error(
+        "kVideo video generation is not connected yet. The current project only has "
+        "the API URL, API key, and workflow fields; it does not define the render "
+        "request endpoint/payload, job-status polling response, or output-download "
+        "contract. The Check kVideo Server button can verify basic reachability, "
+        "but production cannot safely start until the kVideo API documentation or "
+        "a working request/response example is supplied."
+    )
+
+
 def refresh_voicestudio_voice_choices():
     try:
         voices = list_voicestudio_voices()
@@ -3074,8 +3117,8 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
         with gr.Group(visible=False) as kvideo_group:
             gr.Markdown(
                 "## kVideo — API video provider\\n"
-                "Enter your kVideo server connection details and workflow. These fields are intentionally blank; "
-                "generation will be connected after the kVideo API request/response format is provided."
+                "Enter the server URL, API key, and workflow. Check server reachability before starting. "
+                "The render action will require the provider's documented job API contract."
             )
             with gr.Row():
                 kvideo_api = gr.Textbox(
@@ -3092,11 +3135,15 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
                 placeholder="",
                 lines=2,
             )
+            with gr.Row():
+                check_kvideo_button = gr.Button("Check kVideo Server")
+                generate_kvideo_button = gr.Button("Start / Resume kVideo Video Production", variant="primary")
             kvideo_status = gr.Textbox(
-                label="kVideo setup",
-                value="Enter API URL, API key, and workflow when available.",
+                label="kVideo server / production status",
+                value="Enter API URL, API key, and workflow, then click Check kVideo Server.",
                 interactive=False,
-                lines=3,
+                lines=6,
+                elem_classes=["status-output"],
             )
 
         with gr.Group(visible=False) as ltx_video_group:
@@ -3292,6 +3339,9 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
     pause_button.click(fn=request_pause, inputs=[], outputs=progress_status, concurrency_id="generation_controls")
     resume_button.click(fn=request_resume, inputs=[], outputs=progress_status, concurrency_id="generation_controls")
     stop_button.click(fn=request_stop, inputs=[], outputs=progress_status, concurrency_id="generation_controls")
+
+    check_kvideo_button.click(fn=check_kvideo_server_from_ui, inputs=[kvideo_api, kvideo_api_key], outputs=kvideo_status)
+    generate_kvideo_button.click(fn=start_kvideo_video_generation, inputs=[kvideo_api, kvideo_api_key, kvideo_workflow, extracted_text, project_name, book_name, part_number, author_name, poet_image_state], outputs=kvideo_status, concurrency_limit=1, concurrency_id="video_generation")
 
     check_sadtalker_button.click(fn=check_sadtalker_from_ui, inputs=[sadtalker_directory, sadtalker_environment], outputs=sadtalker_status)
     generate_video_button.click(fn=start_video_generation, inputs=[extracted_text, project_name, max_characters, book_type, poet_image_state, sadtalker_directory, sadtalker_environment, preprocess_mode, video_model_size, still_mode, burn_subtitles, subtitle_font, subtitle_font_size, output_resolution, ollama_model, video_transition, video_transition_duration, book_name, author_name, part_number, final_video_filename, max_clip_minutes], outputs=[video_progress_status, final_video_preview, final_video_download, subtitle_download, video_progress_bar], concurrency_limit=1, concurrency_id="video_generation")
