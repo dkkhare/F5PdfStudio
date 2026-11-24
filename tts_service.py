@@ -517,6 +517,33 @@ def _trim_edge_silence(
     return audio[start:end]
 
 
+def _apply_wav_gain(path: Path, gain_db: float) -> None:
+    """Apply output gain to a generated 16-bit PCM WAV, in decibels."""
+    gain_db = max(-24.0, min(24.0, float(gain_db or 0.0)))
+    if abs(gain_db) < 0.001:
+        return
+    import numpy as np
+
+    temporary = path.with_suffix(path.suffix + ".gain.tmp")
+    try:
+        with wave.open(str(path), "rb") as source:
+            params = source.getparams()
+            if params.sampwidth != 2:
+                raise RuntimeError(
+                    f"Volume adjustment supports 16-bit PCM WAV only: {path.name}"
+                )
+            raw = source.readframes(source.getnframes())
+        samples = np.frombuffer(raw, dtype="<i2").astype(np.float32)
+        multiplier = 10.0 ** (gain_db / 20.0)
+        adjusted = np.clip(samples * multiplier, -32768.0, 32767.0).astype("<i2")
+        with wave.open(str(temporary), "wb") as target:
+            target.setparams(params)
+            target.writeframes(adjusted.tobytes())
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def _write_wav(path: Path, audio: Any, sample_rate: int = SAMPLE_RATE) -> None:
     import numpy as np
 
@@ -1008,6 +1035,7 @@ def generate_audiobook(
     kvoive_lufs = kwargs.get("kvoive_lufs", -16)
     kvoive_speakers = kwargs.get("kvoive_speakers") or None
     kvoive_type_options = kwargs.get("kvoive_type_options") or None
+    volume_gain_db = max(-24.0, min(24.0, float(kwargs.get("volume_gain_db", 0.0) or 0.0)))
 
     normalised = _normalise_sections(sections)
     if not normalised:
@@ -1040,19 +1068,19 @@ def generate_audiobook(
     previous_engine = str(previous.get("provider_engine") or provider_engine).strip().lower()
     previous_voice = str(previous.get("provider_voice") or "").strip().lower()
     if provider_engine == "f5tts":
-        current_voice = str(ref_path or "")
+        current_voice = f"{str(ref_path or '')}|gain={volume_gain_db}"
     elif provider_engine == "voicestudio":
-        current_voice = voicestudio_voice
+        current_voice = f"{voicestudio_voice}|gain={volume_gain_db}"
     elif provider_engine == "voicebox":
-        current_voice = f"{voicebox_profile}|{voicebox_language}|{voicebox_model_size}|{voicebox_engine}"
+        current_voice = f"{voicebox_profile}|{voicebox_language}|{voicebox_model_size}|{voicebox_engine}|gain={volume_gain_db}"
     elif provider_engine == "fishspeech":
-        current_voice = fish_reference_id
+        current_voice = f"{fish_reference_id}|gain={volume_gain_db}"
     elif provider_engine == "gemini":
-        current_voice = f"{gemini_model}|{gemini_voice_id}"
+        current_voice = f"{gemini_model}|{gemini_voice_id}|gain={volume_gain_db}"
     elif provider_engine == "kvoive":
-        current_voice = f"{kvoive_api_url}|{kvoive_voice}|{kvoive_content_type}|{kvoive_gender}|{kvoive_lufs}"
+        current_voice = f"{kvoive_api_url}|{kvoive_voice}|{kvoive_content_type}|{kvoive_gender}|{kvoive_lufs}|gain={volume_gain_db}"
     else:
-        current_voice = sarvam_speaker
+        current_voice = f"{sarvam_speaker}|gain={volume_gain_db}"
     if previous and (previous_engine != provider_engine or previous_voice != current_voice.lower()):
         previous = {}
     if previous and str(previous.get("sections_fingerprint") or "") != sections_fingerprint:
@@ -1155,6 +1183,7 @@ def generate_audiobook(
                     kvoive_speakers=kvoive_speakers,
                     kvoive_type_options=kvoive_type_options,
                     )
+                _apply_wav_gain(section_file, volume_gain_db)
             except GenerationStopped:
                 raise
             except Exception as exc:
