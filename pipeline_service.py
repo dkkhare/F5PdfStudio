@@ -995,7 +995,7 @@ def run_video_stage(
                 result = finalize_section_video(
                     raw, destination, text, audio_path=None if is_title_intro else audio,
                     mux_audio=False if is_title_intro else mux_audio,
-                    burn=bool(burn and not is_title_intro),
+                    burn=bool(burn),
                     width=width, height=height, fps=fps, font_name=font_name, font_size=font_size,
                     poetry=poetry, center_text=is_title_intro, work_dir=work_dir,
                 )
