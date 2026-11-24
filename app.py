@@ -158,7 +158,7 @@ def start_kvideo_video_generation(
         "image_sha256": image_digest,
         "extra_seconds": 2.0,
         "max_seconds": 9.6,
-        "audio_piece_seconds": 7.6,
+        "audio_piece_seconds": 9.6,
     }
     base_prompt = (
         "Create a realistic audio-conditioned video. Preserve the identity, face, clothing and "
@@ -170,7 +170,7 @@ def start_kvideo_video_generation(
         section_prompt = base_prompt + "Scene context: " + str(current_section_text[0])[:2500]
         return generate_kvideo(
             api_base, workflow_copy, image_copy, piece_audio, output_path,
-            extra_seconds=2.0, max_seconds=9.6, prompt=section_prompt,
+            extra_seconds=(2.0 if piece_number == piece_count else 0.0), max_seconds=9.6, prompt=section_prompt,
             timeout=3600, api_key=api_key or "",
         )
 
@@ -178,7 +178,7 @@ def start_kvideo_video_generation(
     def generate_one(index, section_text, destination, audio_file):
         current_section_text[0] = str(section_text or "")
         pipeline.generate_in_pieces(
-            generate_piece, destination, Path(audio_file), 7.6,
+            generate_piece, destination, Path(audio_file), 9.6,
             destination.parent, destination.stem,
         )
 
