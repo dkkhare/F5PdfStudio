@@ -155,11 +155,12 @@ def start_kvideo_video_generation(
         "workflow_sha256": workflow_digest,
         "image": image_copy,
         "image_sha256": image_digest,
-        # Duration and tail padding are controlled by the uploaded ComfyUI API workflow.
-        # Do not impose an application-side clip limit or split the narration.
-        "extra_seconds": "from_workflow",
-        "max_seconds": "from_workflow",
-        "audio_piece_seconds": None,
+        # Keep the legacy checkpoint-signature values so completed sections from
+        # earlier runs remain resumable. These values are metadata only: the call
+        # below passes None, so the uploaded ComfyUI workflow controls duration.
+        "extra_seconds": 2.0,
+        "max_seconds": 9.6,
+        "audio_piece_seconds": 9.6,
     }
     base_prompt = (
         "Create a realistic audio-conditioned video. Preserve the identity, face, clothing and "
