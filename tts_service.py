@@ -33,7 +33,7 @@ from typing import Any, Callable, Iterable, Optional, Sequence
 
 from tts_provider import synthesize_sarvam, synthesize_voicestudio, synthesize_voicebox
 from remote_colab_service import fish_speech_tts
-from kvoive_client import tts as kvoive_tts
+from kvoive_client import tts as kvoive_tts, submit_batch as kvoive_submit_batch, job_status as kvoive_job_status, download_book as kvoive_download_book, pause as kvoive_pause, resume as kvoive_resume, stop as kvoive_stop
 
 
 SAMPLE_RATE = 24_000
@@ -97,6 +97,8 @@ class GenerationResult:
 _pause_event = threading.Event()
 _stop_event = threading.Event()
 _control_lock = threading.RLock()
+_kvoive_job_lock = threading.Lock()
+_kvoive_active_job: dict[str, str] = {}
 _model_lock = threading.RLock()
 
 # Set means paused.  It begins cleared (running).
@@ -113,12 +115,28 @@ _cached_vocab: Optional[str] = None
 def request_pause() -> str:
     with _control_lock:
         _pause_event.set()
+    with _kvoive_job_lock:
+        active = dict(_kvoive_active_job)
+    if active.get("job_id"):
+        try:
+            kvoive_pause(active["job_id"], api_url=active["api_url"], api_key=active["api_key"])
+            return "Pause sent to kVoive. It takes effect after the current section finishes."
+        except Exception as exc:
+            return f"Pause requested locally; kVoive pause API reported: {exc}"
     return "Pause requested. Generation will pause after the current audio batch."
 
 
 def request_resume() -> str:
     with _control_lock:
         _pause_event.clear()
+    with _kvoive_job_lock:
+        active = dict(_kvoive_active_job)
+    if active.get("job_id"):
+        try:
+            kvoive_resume(active["job_id"], api_url=active["api_url"], api_key=active["api_key"])
+            return "kVoive job resumed."
+        except Exception as exc:
+            return f"Resume requested locally; kVoive resume API reported: {exc}"
     return "Generation resumed."
 
 
@@ -126,6 +144,14 @@ def request_stop() -> str:
     with _control_lock:
         _stop_event.set()
         _pause_event.clear()  # release a paused worker so it can stop
+    with _kvoive_job_lock:
+        active = dict(_kvoive_active_job)
+    if active.get("job_id"):
+        try:
+            kvoive_stop(active["job_id"], api_url=active["api_url"], api_key=active["api_key"])
+            return "Stop sent to kVoive. It takes effect after the current section; local checkpoint is preserved."
+        except Exception as exc:
+            return f"Stop requested locally; kVoive stop API reported: {exc}"
     return "Stop requested. The checkpoint will be preserved."
 
 
@@ -795,13 +821,48 @@ def _generate_remote_section(
 
     engine = str(provider_engine or "").strip().lower()
     if engine == "kvoive":
-        result = kvoive_tts(text, output_path, api_url=kvoive_api_url or None, api_key=kvoive_api_key or None,
-            voice=kvoive_voice or None, language="hi", fmt="wav", respect_lines=True, master=True,
-            lufs=kvoive_lufs, content_type=kvoive_content_type or "auto", speakers=kvoive_speakers or None,
-            type_options=kvoive_type_options or None, gender=kvoive_gender or None)
-        notes = result.get("voice_notes") or []
-        if notes:
-            _notify(progress_callback, "kVoive voice fallback notes: " + json.dumps(notes, ensure_ascii=False))
+        # One remote batch per local section preserves F5PdfStudio checkpoint/resume
+        # while using the worker's dual-GPU scheduler and native remote controls.
+        remote_book = re.sub(r"[^A-Za-z0-9._-]+", "_", output_path.stem).strip("._-") or "F5PdfStudio"
+        job_id = kvoive_submit_batch(
+            remote_book, "1", [("0001", text, kvoive_content_type or "auto", kvoive_speakers or None)],
+            api_url=kvoive_api_url or None, api_key=kvoive_api_key or None,
+            voice=kvoive_voice or None, language="hi", fmt="wav", respect_lines=True,
+            resume=True, lufs=kvoive_lufs, content_type=kvoive_content_type or "auto",
+            speakers=kvoive_speakers or None, type_options=kvoive_type_options or None,
+            gender=kvoive_gender or None,
+        )
+        with _kvoive_job_lock:
+            _kvoive_active_job.clear()
+            _kvoive_active_job.update({"job_id": job_id, "api_url": kvoive_api_url, "api_key": kvoive_api_key})
+        try:
+            while True:
+                status = kvoive_job_status(job_id, api_url=kvoive_api_url or None, api_key=kvoive_api_key or None)
+                state = str(status.get("status") or "").lower()
+                done = int(status.get("done") or status.get("completed") or 0)
+                total = int(status.get("total") or 1)
+                _notify(progress_callback, {"message": f"kVoive remote job {job_id}: {state} ({done}/{total})",
+                    "status": state, "completed": done, "total": total,
+                    "percentage": 100.0 * done / max(1, total), "voice_notes": status.get("voice_notes")}, done, total)
+                if state in ("done", "done_with_errors", "stopped", "failed"):
+                    break
+                time.sleep(4)
+            if state != "done":
+                raise RuntimeError(f"kVoive batch ended with status '{state}': {json.dumps(status, ensure_ascii=False)[:1200]}")
+            download_dir = output_path.parent / ".kvoive_downloads" / remote_book
+            downloaded = kvoive_download_book(remote_book, download_dir, api_url=kvoive_api_url or None, api_key=kvoive_api_key or None)
+            wavs = [download_dir / Path(name).name for name in downloaded if str(name).lower().endswith(".wav")]
+            wavs = [path for path in wavs if path.exists()]
+            if not wavs:
+                raise RuntimeError(f"kVoive job completed but no WAV was listed for book '{remote_book}'.")
+            shutil.copy2(wavs[0], output_path)
+            section_status = (status.get("sections") or {}).get("0001", {}) if isinstance(status.get("sections"), dict) else {}
+            notes = section_status.get("voice_notes") or status.get("voice_notes") or []
+            if notes:
+                _notify(progress_callback, "kVoive voice fallback notes: " + json.dumps(notes, ensure_ascii=False))
+        finally:
+            with _kvoive_job_lock:
+                _kvoive_active_job.clear()
         return
     if engine not in {"voicestudio", "voicebox", "sarvam", "fishspeech", "gemini"}:
         raise ValueError(f"Unsupported remote TTS engine: {provider_engine}")
