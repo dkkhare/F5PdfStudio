@@ -151,7 +151,6 @@ def start_kvideo_video_generation(
     image_digest = hashlib.sha256(Path(image_copy).read_bytes()).hexdigest()
     api_base = str(api_url).strip().rstrip("/")
     settings = {
-        "api_url": api_base,
         "workflow_name": Path(workflow_copy).name,
         "workflow_sha256": workflow_digest,
         "image": image_copy,
