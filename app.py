@@ -37,6 +37,8 @@ from text_service import (
     split_for_tts,
 )
 
+from kvoive_client import (DEFAULT_API_URL as KVOIVE_DEFAULT_API_URL, check_health as check_kvoive_health, list_voices as list_kvoive_voices, list_content_types as list_kvoive_content_types, register_voice as register_kvoive_voice, delete_voice as delete_kvoive_voice)
+
 from tts_provider import (
     SARVAM_SPEAKERS,
     check_voicestudio,
@@ -115,6 +117,46 @@ def refresh_voicestudio_voice_choices():
         return gr.Dropdown(choices=choices, value=choices[0], label="VoiceStudio voice/profile ID")
     except Exception as exc:
         return gr.Dropdown(choices=["default"], value="default", label=f"VoiceStudio voice/profile ID (API unavailable: {exc})")
+
+def refresh_kvoive_voice_choices(api_url, api_key):
+    try:
+        raw = list_kvoive_voices(api_url=api_url, api_key=api_key)
+        voices = raw.get("voices", raw) if isinstance(raw, dict) else raw
+        choices = [v.get("voice_id") or v.get("id") or v.get("name") for v in voices if isinstance(v, dict)]
+        choices = [str(v) for v in choices if v]
+        return gr.Dropdown(choices=[""] + choices, value=choices[0] if choices else "", label="kVoive cloned narrator voice")
+    except Exception as exc:
+        return gr.Dropdown(choices=[""], value="", label=f"kVoive voices (API error: {exc})", allow_custom_value=True)
+
+def kvoive_register_voice_from_ui(api_url, api_key, voice_id, ref_audio, ref_text, gender, replace):
+    if not ref_audio:
+        raise gr.Error("Upload the clean 3–10 second reference voice clip in the Reference audio field.")
+    if not str(ref_text or "").strip():
+        raise gr.Error("Enter the exact transcript spoken in the reference clip.")
+    try:
+        result = register_kvoive_voice(voice_id, ref_audio, ref_text, api_url=api_url, api_key=api_key,
+                                       lang="hi", gender=gender or None, replace=bool(replace))
+        return f"kVoive voice registered: {json.dumps(result, ensure_ascii=False)}"
+    except Exception as exc:
+        raise gr.Error(f"kVoive voice registration failed: {exc}") from exc
+
+def kvoive_delete_voice_from_ui(api_url, api_key, voice_id):
+    if not str(voice_id or "").strip():
+        raise gr.Error("Select or enter a kVoive voice ID first.")
+    try:
+        result = delete_kvoive_voice(voice_id, api_url=api_url, api_key=api_key)
+        return f"kVoive voice deleted: {json.dumps(result, ensure_ascii=False)}"
+    except Exception as exc:
+        raise gr.Error(f"kVoive voice deletion failed: {exc}") from exc
+
+def check_kvoive_from_ui(api_url, api_key):
+    try:
+        health = check_kvoive_health(api_url)
+        voices = list_kvoive_voices(api_url=api_url, api_key=api_key)
+        types = list_kvoive_content_types(api_url=api_url, api_key=api_key)
+        return "Health: " + json.dumps(health, ensure_ascii=False) + "\nVoices: " + json.dumps(voices, ensure_ascii=False) + "\nContent types: " + json.dumps(types, ensure_ascii=False)
+    except Exception as exc:
+        return f"kVoive connection failed: {exc}"
 
 def refresh_voicebox_profile_choices():
     try:
@@ -1338,6 +1380,14 @@ def start_generation(
     gemini_api_key,
     gemini_model,
     gemini_voice_id,
+    kvoive_api_url,
+    kvoive_api_key,
+    kvoive_voice,
+    kvoive_content_type,
+    kvoive_gender,
+    kvoive_lufs,
+    kvoive_speakers_json,
+    kvoive_type_options_json,
     colab_url,
     colab_token,
     speech_speed,
@@ -1379,6 +1429,16 @@ def start_generation(
             raise gr.Error("Enter the Gemini API key.")
         if not str(gemini_voice_id or '').strip():
             raise gr.Error("Create/select a Gemini replicated voice ID first, or enter a prebuilt voice name such as Kore.")
+    elif selected_engine == "kvoive":
+        if not str(kvoive_api_key or os.getenv("TTS_API_KEY") or "").strip():
+            raise gr.Error("Enter the kVoive API key or set TTS_API_KEY in the environment.")
+        if not str(kvoive_api_url or os.getenv("TTS_API_URL") or KVOIVE_DEFAULT_API_URL).strip():
+            raise gr.Error("Enter the kVoive API URL.")
+        try:
+            if str(kvoive_speakers_json or "").strip(): json.loads(kvoive_speakers_json)
+            if str(kvoive_type_options_json or "").strip(): json.loads(kvoive_type_options_json)
+        except json.JSONDecodeError as exc:
+            raise gr.Error(f"kVoive JSON settings are invalid: {exc}") from exc
 
     if not project_name:
         raise gr.Error(
@@ -1563,6 +1623,14 @@ def start_generation(
                 gemini_api_key=str(gemini_api_key or ""),
                 gemini_model=str(gemini_model or GEMINI_DEFAULT_TTS_MODEL),
                 gemini_voice_id=str(gemini_voice_id or ""),
+                kvoive_api_url=str(kvoive_api_url or KVOIVE_DEFAULT_API_URL),
+                kvoive_api_key=str(kvoive_api_key or ""),
+                kvoive_voice=str(kvoive_voice or ""),
+                kvoive_content_type=str(kvoive_content_type or "auto"),
+                kvoive_gender=str(kvoive_gender or ""),
+                kvoive_lufs=float(kvoive_lufs) if kvoive_lufs not in (None, "") else -16,
+                kvoive_speakers=json.loads(kvoive_speakers_json) if str(kvoive_speakers_json or "").strip() else None,
+                kvoive_type_options=json.loads(kvoive_type_options_json) if str(kvoive_type_options_json or "").strip() else None,
                 colab_url=str(colab_url or DEFAULT_COLAB_URL),
                 colab_token=str(colab_token or ""),
                 speed=float(
@@ -2656,7 +2724,7 @@ def _correction_engine_visibility(engine):
 def _audio_engine_visibility(engine):
     engine = str(engine or "f5tts").lower()
     return (
-        gr.update(visible=engine in {"f5tts", "voicestudio"}),
+        gr.update(visible=engine in {"f5tts", "voicestudio", "kvoive"}),
         gr.update(visible=engine == "f5tts"),
         gr.update(visible=engine == "voicestudio"),
         gr.update(visible=engine == "voicestudio"),
@@ -2666,6 +2734,7 @@ def _audio_engine_visibility(engine):
         gr.update(visible=engine == "fishspeech"),
         gr.update(visible=engine == "gemini"),
         gr.update(visible=engine == "fishspeech"),   # Colab connection: only Fish Speech needs it here
+        gr.update(visible=engine == "kvoive"),
     )
 
 def _video_engine_visibility(engine):
@@ -2825,6 +2894,7 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
                 ("Sarvam Bulbul v3 — cloud", "sarvam"),
                 ("Fish Speech — Colab GPU", "fishspeech"),
                 ("Gemini TTS — cloud + replicated voice", "gemini"),
+                ("kVoive — Kaggle dual-GPU Hindi TTS API", "kvoive"),
             ], value="f5tts", label="Audio engine")
         with gr.Group(visible=True) as reference_audio_group:
             with gr.Row():
@@ -2860,6 +2930,27 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
             fish_reference_status = gr.Textbox(label="Fish Speech reference status", value="deven — registered reference voice", interactive=False, lines=2)
             gr.Markdown("Fish Speech uses the native `reference_id` API. Reference voices can be persisted on Google Drive by the Colab media server.")
 
+        with gr.Group(visible=False) as kvoive_audio_group:
+            gr.Markdown("### kVoive — Hindi TTS API (Kaggle worker pool)")
+            with gr.Row():
+                kvoive_api_url = gr.Textbox(value=KVOIVE_DEFAULT_API_URL, label="kVoive API URL")
+                kvoive_api_key = gr.Textbox(value="", type="password", label="kVoive API key (not saved)")
+                check_kvoive_button = gr.Button("Check kVoive API")
+            with gr.Row():
+                kvoive_voice = gr.Dropdown(choices=[""], value="", allow_custom_value=True, label="Narrator / cloned voice ID")
+                refresh_kvoive_voices_button = gr.Button("Refresh cloned voices")
+                kvoive_content_type = gr.Dropdown(choices=["auto", "poetry", "drama", "story", "novel", "prose"], value="auto", label="Content type")
+            with gr.Row():
+                kvoive_gender = gr.Dropdown(choices=[("Auto / infer", ""), ("Male", "m"), ("Female", "f")], value="", label="Narrator gender fallback")
+                kvoive_lufs = gr.Slider(-24, -8, value=-16, step=1, label="Master loudness (LUFS)")
+                kvoive_replace_voice = gr.Checkbox(value=False, label="Replace existing clone with same ID")
+            with gr.Row():
+                kvoive_new_voice_id = gr.Textbox(label="New cloned voice ID", placeholder="e.g. my_voice")
+                register_kvoive_voice_button = gr.Button("Register clone from Reference audio")
+                delete_kvoive_voice_button = gr.Button("Delete selected clone", variant="stop")
+            kvoive_speakers_json = gr.Textbox(label="Drama speakers JSON (optional)", lines=3, placeholder='{"राम":{"voice":"ram_clone","gender":"m"},"सीता":{"voice":"sita_clone","gender":"f"}}')
+            kvoive_type_options_json = gr.Textbox(label="Advanced type options JSON (optional)", lines=2, placeholder='{"line_pause":800} or {"stage_directions":"skip"}')
+            kvoive_status = gr.Textbox(label="kVoive API / voice status", lines=5, interactive=False)
         with gr.Group(visible=False) as gemini_audio_group:
             with gr.Row():
                 gemini_audio_model = gr.Dropdown(choices=["gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts"], value=GEMINI_DEFAULT_TTS_MODEL, label="Gemini TTS model")
@@ -3128,7 +3219,7 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
     )
     tts_engine.change(
         fn=_audio_engine_visibility, inputs=[tts_engine],
-        outputs=[reference_audio_group, f5tts_audio_group, voicestudio_audio_group, voicestudio_refresh_group, voicebox_audio_group, voicebox_refresh_group, sarvam_audio_group, fishspeech_audio_group, gemini_audio_group, colab_audio_group]
+        outputs=[reference_audio_group, f5tts_audio_group, voicestudio_audio_group, voicestudio_refresh_group, voicebox_audio_group, voicebox_refresh_group, sarvam_audio_group, fishspeech_audio_group, gemini_audio_group, colab_audio_group, kvoive_audio_group]
     )
     video_engine.change(
         fn=_video_engine_visibility, inputs=[video_engine],
@@ -3145,6 +3236,10 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
 
     refresh_vs_voices_button.click(fn=refresh_voicestudio_voice_choices, inputs=[], outputs=voicestudio_voice)
     refresh_voicebox_button.click(fn=refresh_voicebox_profile_choices, inputs=[], outputs=voicebox_profile)
+    refresh_kvoive_voices_button.click(fn=refresh_kvoive_voice_choices, inputs=[kvoive_api_url, kvoive_api_key], outputs=kvoive_voice)
+    check_kvoive_button.click(fn=check_kvoive_from_ui, inputs=[kvoive_api_url, kvoive_api_key], outputs=kvoive_status)
+    register_kvoive_voice_button.click(fn=kvoive_register_voice_from_ui, inputs=[kvoive_api_url, kvoive_api_key, kvoive_new_voice_id, reference_audio, reference_transcript, kvoive_gender, kvoive_replace_voice], outputs=kvoive_status)
+    delete_kvoive_voice_button.click(fn=kvoive_delete_voice_from_ui, inputs=[kvoive_api_url, kvoive_api_key, kvoive_voice], outputs=kvoive_status)
     refresh_fish_references_button.click(fn=refresh_fish_reference_choices, inputs=[colab_url, colab_token], outputs=[fish_reference_id, fish_reference_status])
     check_colab_button.click(fn=check_colab_from_ui, inputs=[colab_url, colab_token], outputs=colab_status)
     check_wan_colab_button.click(fn=check_colab_from_ui, inputs=[video_colab_url, video_colab_token], outputs=wan_status)
@@ -3152,7 +3247,7 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
     check_video_colab_button.click(fn=check_colab_from_ui, inputs=[video_colab_url, video_colab_token], outputs=video_colab_status)
     colab_url.change(fn=lambda value: value, inputs=colab_url, outputs=video_colab_url)  # same server by default
 
-    generate_button.click(fn=start_generation, inputs=[extracted_text, book_type, book_name, part_number, author_name, reference_audio, reference_transcript, project_name, max_characters, tts_engine, voicestudio_voice, voicebox_profile, voicebox_language, voicebox_model_size, voicebox_engine, sarvam_speaker, sarvam_api_key, fish_reference_id, gemini_api_key_audio, gemini_audio_model, gemini_voice_id, colab_url, colab_token, speech_speed, pause_duration, poetry_line_pause_duration, device_choice, seed, nfe_steps, create_mp3, ollama_model], outputs=[progress_status, final_audio, wav_download, mp3_download, audio_progress_bar], concurrency_limit=1, concurrency_id="generation")
+    generate_button.click(fn=start_generation, inputs=[extracted_text, book_type, book_name, part_number, author_name, reference_audio, reference_transcript, project_name, max_characters, tts_engine, voicestudio_voice, voicebox_profile, voicebox_language, voicebox_model_size, voicebox_engine, sarvam_speaker, sarvam_api_key, fish_reference_id, gemini_api_key_audio, gemini_audio_model, gemini_voice_id, kvoive_api_url, kvoive_api_key, kvoive_voice, kvoive_content_type, kvoive_gender, kvoive_lufs, kvoive_speakers_json, kvoive_type_options_json, colab_url, colab_token, speech_speed, pause_duration, poetry_line_pause_duration, device_choice, seed, nfe_steps, create_mp3, ollama_model], outputs=[progress_status, final_audio, wav_download, mp3_download, audio_progress_bar], concurrency_limit=1, concurrency_id="generation")
     pause_button.click(fn=request_pause, inputs=[], outputs=progress_status, concurrency_id="generation_controls")
     resume_button.click(fn=request_resume, inputs=[], outputs=progress_status, concurrency_id="generation_controls")
     stop_button.click(fn=request_stop, inputs=[], outputs=progress_status, concurrency_id="generation_controls")
