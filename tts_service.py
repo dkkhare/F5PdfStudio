@@ -33,6 +33,7 @@ from typing import Any, Callable, Iterable, Optional, Sequence
 
 from tts_provider import synthesize_sarvam, synthesize_voicestudio, synthesize_voicebox
 from remote_colab_service import fish_speech_tts
+from kvoive_client import tts as kvoive_tts
 
 
 SAMPLE_RATE = 24_000
@@ -780,11 +781,28 @@ def _generate_remote_section(
     speed: float,
     progress_callback: Optional[Callable[..., Any]],
     inter_batch_pause_ms: int = 120,
+    kvoive_api_url: str = "",
+    kvoive_api_key: str = "",
+    kvoive_voice: str = "",
+    kvoive_content_type: str = "auto",
+    kvoive_gender: str = "",
+    kvoive_lufs: Optional[float] = -16,
+    kvoive_speakers: Optional[dict[str, Any]] = None,
+    kvoive_type_options: Optional[dict[str, Any]] = None,
 ) -> None:
-    """Generate one section through VoiceStudio or Sarvam and write one WAV."""
+    """Generate one section through a configured remote TTS provider."""
     import numpy as np
 
     engine = str(provider_engine or "").strip().lower()
+    if engine == "kvoive":
+        result = kvoive_tts(text, output_path, api_url=kvoive_api_url or None, api_key=kvoive_api_key or None,
+            voice=kvoive_voice or None, language="hi", fmt="wav", respect_lines=True, master=True,
+            lufs=kvoive_lufs, content_type=kvoive_content_type or "auto", speakers=kvoive_speakers or None,
+            type_options=kvoive_type_options or None, gender=kvoive_gender or None)
+        notes = result.get("voice_notes") or []
+        if notes:
+            _notify(progress_callback, "kVoive voice fallback notes: " + json.dumps(notes, ensure_ascii=False))
+        return
     if engine not in {"voicestudio", "voicebox", "sarvam", "fishspeech", "gemini"}:
         raise ValueError(f"Unsupported remote TTS engine: {provider_engine}")
 
@@ -919,6 +937,14 @@ def generate_audiobook(
     voicebox_engine = str(kwargs.get("voicebox_engine") or "qwen").strip()
     colab_url = str(kwargs.get("colab_url") or "").strip()
     colab_token = str(kwargs.get("colab_token") or "").strip()
+    kvoive_api_url = str(kwargs.get("kvoive_api_url") or os.getenv("TTS_API_URL") or "https://definitions-taxation-essay-excited.trycloudflare.com").strip()
+    kvoive_api_key = str(kwargs.get("kvoive_api_key") or os.getenv("TTS_API_KEY") or "").strip()
+    kvoive_voice = str(kwargs.get("kvoive_voice") or "").strip()
+    kvoive_content_type = str(kwargs.get("kvoive_content_type") or "auto").strip()
+    kvoive_gender = str(kwargs.get("kvoive_gender") or "").strip()
+    kvoive_lufs = kwargs.get("kvoive_lufs", -16)
+    kvoive_speakers = kwargs.get("kvoive_speakers") or None
+    kvoive_type_options = kwargs.get("kvoive_type_options") or None
 
     normalised = _normalise_sections(sections)
     if not normalised:
@@ -960,6 +986,8 @@ def generate_audiobook(
         current_voice = fish_reference_id
     elif provider_engine == "gemini":
         current_voice = f"{gemini_model}|{gemini_voice_id}"
+    elif provider_engine == "kvoive":
+        current_voice = f"{kvoive_api_url}|{kvoive_voice}|{kvoive_content_type}|{kvoive_gender}|{kvoive_lufs}"
     else:
         current_voice = sarvam_speaker
     if previous and (previous_engine != provider_engine or previous_voice != current_voice.lower()):
@@ -1055,6 +1083,14 @@ def generate_audiobook(
                         speed=float(speed),
                         progress_callback=progress_callback,
                         inter_batch_pause_ms=int(inter_batch_pause_ms),
+                    kvoive_api_url=kvoive_api_url,
+                    kvoive_api_key=kvoive_api_key,
+                    kvoive_voice=kvoive_voice,
+                    kvoive_content_type=kvoive_content_type,
+                    kvoive_gender=kvoive_gender,
+                    kvoive_lufs=kvoive_lufs,
+                    kvoive_speakers=kvoive_speakers,
+                    kvoive_type_options=kvoive_type_options,
                     )
             except GenerationStopped:
                 raise
