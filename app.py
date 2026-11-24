@@ -155,9 +155,11 @@ def start_kvideo_video_generation(
         "workflow_sha256": workflow_digest,
         "image": image_copy,
         "image_sha256": image_digest,
-        "extra_seconds": 2.0,
-        "max_seconds": 9.6,
-        "audio_piece_seconds": 9.6,
+        # Duration and tail padding are controlled by the uploaded ComfyUI API workflow.
+        # Do not impose an application-side clip limit or split the narration.
+        "extra_seconds": "from_workflow",
+        "max_seconds": "from_workflow",
+        "audio_piece_seconds": None,
     }
     base_prompt = (
         "Create a realistic audio-conditioned video. Preserve the identity, face, clothing and "
@@ -169,17 +171,17 @@ def start_kvideo_video_generation(
         section_prompt = base_prompt + "Scene context: " + str(current_section_text[0])[:2500]
         return generate_kvideo(
             api_base, workflow_copy, image_copy, piece_audio, output_path,
-            extra_seconds=(2.0 if piece_number == piece_count else 0.0), max_seconds=9.6, prompt=section_prompt,
+            # Preserve max_seconds and extra_seconds exactly as supplied in the uploaded workflow.
+            extra_seconds=None, max_seconds=None, prompt=section_prompt,
             timeout=3600, api_key=api_key or "",
         )
 
     current_section_text = [""]
     def generate_one(index, section_text, destination, audio_file):
         current_section_text[0] = str(section_text or "")
-        pipeline.generate_in_pieces(
-            generate_piece, destination, Path(audio_file), 9.6,
-            destination.parent, destination.stem,
-        )
+        # Submit the complete audiobook section as one continuous audio input.
+        # Duration and tail padding are controlled by AudioPadToVideoLength in the uploaded workflow.
+        generate_piece(1, 1, destination, Path(audio_file), 0.0)
 
     engine_name = "kvideo_ltx_audio"
     def runner(notify):
@@ -3165,8 +3167,9 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
                 "## kVideo — LTX image + audio workflow (ComfyUI API)\n"
                 "Enter the ComfyUI server URL and optional bearer API key, then upload the workflow exported with "
                 "Workflow > Export (API). The workflow must contain LoadImage, LoadAudio, AudioPadToVideoLength, "
-                "LTXVConditioning, and SaveVideo nodes. Each audio section is split into safe 7.6-second pieces "
-                "and rendered with 2 seconds of tail padding (9.6-second workflow limit)."
+                "LTXVConditioning, and SaveVideo nodes. Each audiobook section is submitted as one continuous "
+                "audio input. The uploaded workflow controls its own max_seconds and extra_seconds values; "
+                "no application-side duration cap or automatic audio splitting is applied."
             )
             with gr.Row():
                 kvideo_api = gr.Textbox(label="kVideo API URL", placeholder="https://your-comfyui-tunnel.trycloudflare.com")
