@@ -2755,6 +2755,7 @@ def _video_engine_visibility(engine):
         gr.update(visible=engine == "wan2.2"),
         gr.update(visible=engine == "ltx2.5"),
         gr.update(visible=engine == "ltx2.3"),
+        gr.update(visible=engine == "kvideo"),
         gr.update(visible=engine in {"wan2.2", "ltx2.5"}),   # Colab media server: only Wan2.2 / LTX-2.5
     )
 
@@ -3006,7 +3007,7 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
             "whole video, and the clip is saved as `<book>_<part>_<nnn>.mp4` in the project's `video/sections` folder. "
             "When all sections are finished they are combined into clips of at most the length below; a section is never cut."
         )
-        video_engine = gr.Dropdown(choices=[("SadTalker — local", "sadtalker"), ("Wan2.2 — Colab", "wan2.2"), ("LTX-2.5 — Colab", "ltx2.5"), ("LTX-2.3 / LTX-2.5 Pose — LTX API worker pool", "ltx2.3")], value="sadtalker", label="Video engine")
+        video_engine = gr.Dropdown(choices=[("SadTalker — local", "sadtalker"), ("Wan2.2 — Colab", "wan2.2"), ("LTX-2.5 — Colab", "ltx2.5"), ("LTX-2.3 / LTX-2.5 Pose — LTX API worker pool", "ltx2.3"), ("kVideo — API workflow", "kvideo")], value="sadtalker", label="Video engine")
         ltx_workers_timer = gr.Timer(30) if hasattr(gr, "Timer") else None
         poet_image = gr.Image(label="Portrait / character image", type="filepath", sources=["upload"])
         poet_image_state = gr.State(value=None)
@@ -3069,6 +3070,34 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
             wan_status = gr.Textbox(label="Wan2.2 Colab status", lines=8, interactive=False, elem_classes=["status-output"])
             wan_preview = gr.Video(label="Wan2.2 result")
             wan_download = gr.File(label="Download combined clips / section videos", file_count="multiple")
+
+        with gr.Group(visible=False) as kvideo_group:
+            gr.Markdown(
+                "## kVideo — API video provider\\n"
+                "Enter your kVideo server connection details and workflow. These fields are intentionally blank; "
+                "generation will be connected after the kVideo API request/response format is provided."
+            )
+            with gr.Row():
+                kvideo_api = gr.Textbox(
+                    label="kVideo API URL",
+                    placeholder="",
+                )
+                kvideo_api_key = gr.Textbox(
+                    label="kVideo API Key",
+                    type="password",
+                    placeholder="",
+                )
+            kvideo_workflow = gr.Textbox(
+                label="kVideo workflow",
+                placeholder="",
+                lines=2,
+            )
+            kvideo_status = gr.Textbox(
+                label="kVideo setup",
+                value="Enter API URL, API key, and workflow when available.",
+                interactive=False,
+                lines=3,
+            )
 
         with gr.Group(visible=False) as ltx_video_group:
             gr.Markdown("## LTX-2.5 — Colab option")
@@ -3235,7 +3264,7 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
     )
     video_engine.change(
         fn=_video_engine_visibility, inputs=[video_engine],
-        outputs=[sadtalker_video_group, wan_video_group, ltx_video_group, ltx23_video_group, colab_video_group]
+        outputs=[sadtalker_video_group, wan_video_group, ltx_video_group, ltx23_video_group, kvideo_group, colab_video_group]
     )
 
     state_outputs = [project_name, book_name, part_number, author_name, project_status, project_output_path, book_type, extracted_text, extraction_status, text_status, ollama_status, section_preview, reference_audio, reference_transcript, progress_status, final_audio, wav_download, mp3_download, audio_progress_bar, poet_image, video_progress_status, final_video_preview, final_video_download, subtitle_download, video_progress_bar, final_video_filename, max_characters, tts_engine, voicestudio_voice, voicebox_profile, voicebox_language, voicebox_model_size, voicebox_engine, sarvam_speaker, sarvam_api_key, fish_reference_id, colab_url, colab_token, device_choice, speech_speed, pause_duration, poetry_line_pause_duration, seed, nfe_steps, volume_gain_db, create_mp3, sadtalker_directory, sadtalker_environment, preprocess_mode, video_model_size, still_mode, output_resolution, burn_subtitles, subtitle_font, subtitle_font_size, video_transition, video_transition_duration, sadtalker_status, wan_checkpoint, wan_task, wan_prompt, wan_status, wan_size, wan_frame_num, wan_steps, wan_seed, wan_audio_section, ltx_status, ltx_mode, ltx_prompt, ltx_duration, ltx_fps]
