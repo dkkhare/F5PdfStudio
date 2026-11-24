@@ -917,7 +917,7 @@ def run_video_stage(
     settings.update({"burn": bool(burn), "width": int(width), "height": int(height), "font": font_name,
                      "font_size": int(font_size), "mux_audio": bool(mux_audio)})
     title_intro_index = (
-        1 if audio_files and audio_files[0] and _looks_like_poem_title(sections[0])
+        1 if poetry and audio_files and audio_files[0] and _looks_like_poem_title(sections[0])
         and probe_media(audio_files[0])["duration"] <= 6.0 else None
     )
     settings["poem_title_intro_index"] = title_intro_index
