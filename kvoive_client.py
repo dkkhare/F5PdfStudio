@@ -98,8 +98,12 @@ def job_status(job_id, *, api_url=None, api_key=None):
 
 def _job_action(job_id, action, *, api_url=None, api_key=None):
     url, key = _config(api_url, api_key)
-    return _check(requests.post(f"{url}/v1/jobs/{job_id}/{action}",
-                                headers=_headers(key), timeout=60)).json()
+    response = _check(requests.post(f"{url}/v1/jobs/{job_id}/{action}",
+                                     headers=_headers(key), timeout=60))
+    try:
+        return response.json()
+    except ValueError:
+        return {"status": "ok", "action": action}
 
 
 def pause(job_id, **kwargs): return _job_action(job_id, "pause", **kwargs)
