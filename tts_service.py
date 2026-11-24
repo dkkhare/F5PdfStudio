@@ -847,6 +847,8 @@ def _generate_remote_section(
                 if state in ("done", "done_with_errors", "stopped", "failed"):
                     break
                 time.sleep(4)
+            if state == "stopped":
+                raise GenerationStopped("kVoive job stopped by user; local section checkpoint will be preserved.")
             if state != "done":
                 raise RuntimeError(f"kVoive batch ended with status '{state}': {json.dumps(status, ensure_ascii=False)[:1200]}")
             download_dir = output_path.parent / ".kvoive_downloads" / remote_book
