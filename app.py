@@ -1396,6 +1396,7 @@ def start_generation(
     device_choice,
     seed,
     nfe_steps,
+    volume_gain_db,
     create_mp3,
     ollama_model,
 ):
@@ -1489,6 +1490,7 @@ def start_generation(
         "seed": int(seed),
         "nfe_steps": int(nfe_steps),
         "create_mp3": bool(create_mp3),
+        "volume_gain_db": float(volume_gain_db or 0.0),
     })
 
     if (
@@ -1658,6 +1660,7 @@ def start_generation(
                 nfe_steps=int(
                     nfe_steps
                 ),
+                volume_gain_db=float(volume_gain_db or 0.0),
                 create_mp3=bool(
                     create_mp3
                 ),
@@ -2978,6 +2981,7 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
         with gr.Row():
             pause_duration = gr.Slider(0, 2000, value=750, step=50, label="Silence between sections (ms)")
             poetry_line_pause_duration = gr.Slider(200, 1200, value=450, step=50, label="Poetry line pause (ms)")
+            volume_gain_db = gr.Slider(-12, 12, value=0, step=1, label="Output volume (dB): decrease / increase")
             create_mp3 = gr.Checkbox(value=True, label="Create MP3")
         with gr.Group(visible=False) as voicestudio_refresh_group:
             refresh_vs_voices_button = gr.Button("Refresh VoiceStudio voices")
@@ -3255,7 +3259,7 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
     check_video_colab_button.click(fn=check_colab_from_ui, inputs=[video_colab_url, video_colab_token], outputs=video_colab_status)
     colab_url.change(fn=lambda value: value, inputs=colab_url, outputs=video_colab_url)  # same server by default
 
-    generate_button.click(fn=start_generation, inputs=[extracted_text, book_type, book_name, part_number, author_name, reference_audio, reference_transcript, project_name, max_characters, tts_engine, voicestudio_voice, voicebox_profile, voicebox_language, voicebox_model_size, voicebox_engine, sarvam_speaker, sarvam_api_key, fish_reference_id, gemini_api_key_audio, gemini_audio_model, gemini_voice_id, kvoive_api_url, kvoive_api_key, kvoive_voice, kvoive_content_type, kvoive_gender, kvoive_lufs, kvoive_speakers_json, kvoive_type_options_json, colab_url, colab_token, speech_speed, pause_duration, poetry_line_pause_duration, device_choice, seed, nfe_steps, create_mp3, ollama_model], outputs=[progress_status, final_audio, wav_download, mp3_download, audio_progress_bar], concurrency_limit=1, concurrency_id="generation")
+    generate_button.click(fn=start_generation, inputs=[extracted_text, book_type, book_name, part_number, author_name, reference_audio, reference_transcript, project_name, max_characters, tts_engine, voicestudio_voice, voicebox_profile, voicebox_language, voicebox_model_size, voicebox_engine, sarvam_speaker, sarvam_api_key, fish_reference_id, gemini_api_key_audio, gemini_audio_model, gemini_voice_id, kvoive_api_url, kvoive_api_key, kvoive_voice, kvoive_content_type, kvoive_gender, kvoive_lufs, kvoive_speakers_json, kvoive_type_options_json, colab_url, colab_token, speech_speed, pause_duration, poetry_line_pause_duration, device_choice, seed, nfe_steps, volume_gain_db, create_mp3, ollama_model], outputs=[progress_status, final_audio, wav_download, mp3_download, audio_progress_bar], concurrency_limit=1, concurrency_id="generation")
     pause_button.click(fn=request_pause, inputs=[], outputs=progress_status, concurrency_id="generation_controls")
     resume_button.click(fn=request_resume, inputs=[], outputs=progress_status, concurrency_id="generation_controls")
     stop_button.click(fn=request_stop, inputs=[], outputs=progress_status, concurrency_id="generation_controls")
