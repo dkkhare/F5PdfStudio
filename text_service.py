@@ -91,10 +91,10 @@ def split_for_tts(
 
         def flush_verse_buffer() -> None:
             while verse_buffer:
-                sections.append("\\n".join(verse_buffer[:2]))
+                sections.append("\n".join(verse_buffer[:2]))
                 del verse_buffer[:2]
 
-        heading_pattern = re.compile(r"^#{1,5}\\s+\\S")
+        heading_pattern = re.compile(r"^#{1,5}\s+\\S")
         for raw_line in text.splitlines():
             line = raw_line.strip()
             if not line:
@@ -102,14 +102,14 @@ def split_for_tts(
 
             if heading_pattern.match(line):
                 flush_verse_buffer()
-                title = re.sub(r"^#{1,5}\\s+", "", line).strip()
+                title = re.sub(r"^#{1,5}\s+", "", line).strip()
                 if title:
                     sections.append(title)
                 continue
 
             verse_buffer.append(line)
             if len(verse_buffer) == 2:
-                sections.append("\\n".join(verse_buffer))
+                sections.append("\n".join(verse_buffer))
                 verse_buffer.clear()
 
         flush_verse_buffer()
