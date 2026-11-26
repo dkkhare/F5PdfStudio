@@ -584,7 +584,8 @@ def prepare_clean_text(
     status = (
         "Text cleaned successfully.\n"
         f"Characters: {len(cleaned):,}\n"
-        "PDF/Word location markers were removed."
+        "PDF/Word location markers and invisible extraction artifacts were removed. "
+        "Headings, paragraph boundaries, poetry line breaks and punctuation were preserved."
     )
 
     return cleaned, status
