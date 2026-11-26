@@ -386,31 +386,27 @@ def _normalize_input(text: str) -> str:
     return text.strip()
 
 def _restore_poetry_heading_markers(source: str, corrected: str) -> str:
-    """Restore Word Heading 2 markers if the proofreader drops Markdown syntax.
-
-    Heading 2 metadata is exported as a leading Markdown level-2 marker.
-    Small local models sometimes remove that marker despite explicit instructions.
-    Restore it only when the original heading text matches a corrected output line;
-    never infer headings from ordinary verse text.
-    """
-    headings = [
-        re.sub(r"^##\s+", "", line.strip()).strip()
-        for line in str(source or "").splitlines()
-        if re.match(r"^\s*##\s+\S", line)
-    ]
+    """Restore Word Heading 1–5 markers if the proofreader drops them."""
+    heading_pattern = re.compile(r"^\\s*(#{1,5})\\s+\\S")
+    headings = []
+    for line in str(source or "").splitlines():
+        match = heading_pattern.match(line)
+        if match:
+            marker = match.group(1)
+            title = re.sub(r"^#{1,5}\\s+", "", line.strip()).strip()
+            headings.append((marker, title))
     if not headings:
         return corrected
 
     lines = str(corrected or "").splitlines()
-    for heading in headings:
+    for marker, heading in headings:
         for index, line in enumerate(lines):
-            candidate = re.sub(r"^##\s+", "", line.strip()).strip()
+            candidate = re.sub(r"^#{1,5}\\s+", "", line.strip()).strip()
             if candidate == heading:
-                lines[index] = f"## {heading}"
+                lines[index] = f"{marker} {heading}"
                 break
 
-    return "\n".join(lines)
-
+    return "\\n".join(lines)
 
 def _split_text(text: str, maximum: int) -> list[TextChunk]:
     """Split on paragraph/sentence boundaries while preserving order."""
@@ -667,8 +663,8 @@ def correct_ocr_chunk(
             "Make grammar changes only when clearly erroneous; preserve deliberate poetic "
             "syntax, diction, dialect, rhythm, rhyme, metre, refrains and repetition. "
             "Preserve every verse line and stanza break. A comma inside a verse line is "
-            "a poetic pause, not a line break. Keep Markdown level-2 heading prefixes "
-            "(## ) on their own lines."
+            "a poetic pause, not a line break. Keep Markdown Heading 1–5 prefixes "
+            "(# through #####) on their own lines."
         ),
         "Drama": (
             "Correct all clear Hindi/English spelling, matra, grammar and punctuation "
