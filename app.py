@@ -766,7 +766,7 @@ def ollama_correct_text(
 
     control = pipeline.get_control("correct")
     control.clear()
-    cache_file = _cache_path("ollama", text, model, correction_language, book_type, chunk_size)
+    cache_file = _cache_path("ollama", "proofread-rules-v2", text, model, correction_language, book_type, chunk_size)
     saved = _cache_read(cache_file)
     resume_chunks = {int(k): v for k, v in (saved.get("chunks") or {}).items()}
     chunk_state = {"count": int(saved.get("total") or 0)}
