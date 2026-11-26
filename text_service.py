@@ -2,11 +2,33 @@ import re
 
 
 def clean_text(text: str):
-    text = text.replace("\u00a0", " ")
-    text = text.replace("\u200b", "")
-    text = re.sub(r"[ \t]+", " ", text)
-    text = re.sub(r" *\n *", "\n", text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
+    """
+    Normalize extraction noise without changing the document's structure.
+
+    Preserve heading markers (including Markdown Heading 1/2), paragraph
+    boundaries, poetry line breaks, dialogue punctuation and all visible text.
+    """
+    if text is None:
+        return ""
+
+    text = str(text)
+
+    # Normalize platform-specific line endings before touching whitespace.
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+
+    # Normalize common invisible characters introduced by PDF/Word extraction.
+    text = text.replace("\ufeff", "")   # byte-order mark
+    text = text.replace("\u00a0", " ") # non-breaking space
+    text = text.replace("\u200b", "")  # zero-width space
+    text = text.replace("\u2060", "")  # word joiner
+    text = text.replace("\u00ad", "")  # soft hyphen
+
+    # Clean horizontal whitespace only; never join separate text lines.
+    text = re.sub(r"[\\t\\f\\v ]+", " ", text)
+    text = re.sub(r" *\\n *", "\\n", text)
+
+    # Keep one blank line between paragraphs, headings and verse blocks.
+    text = re.sub(r"\\n{3,}", "\\n\\n", text)
 
     return text.strip()
 
