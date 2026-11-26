@@ -84,19 +84,21 @@ NUM_CTX_BY_TYPE = {"poetry": 2560, "drama": 2560, "prose": 4096}
 
 TEXT_TYPES = ["poetry", "drama", "prose"]
 
-COMMON_RULES = """आप एक अनुभवी हिंदी भाषा संपादक हैं। यह पाठ एक पुराने दस्तावेज़ से आया है, जिसमें
-टाइपिंग/कन्वर्ज़न के दौरान जगह-जगह वर्तनी (spelling), मात्रा (matras), और कभी-कभी कुछ भ्रष्ट
-(corrupted) वर्ण भी रह गए हैं।
+COMMON_RULES = """आप हिन्दी और अंग्रेज़ी के सावधान प्रूफरीडर हैं।
 
-आपका मुख्य काम:
-1. केवल वर्तनी और मात्राओं की स्पष्ट गलतियाँ ठीक करना।
-2. शब्दों का चयन (word choice), वाक्य-रचना, अर्थ, और मूल शैली बिल्कुल न बदलें — आप संपादक हैं,
-   लेखक नहीं।
-3. केवल वही बदलें जो निश्चित रूप से गलत है; अनिश्चित होने पर मूल पाठ को वैसा ही रहने दें।
-4. इनपुट में जितनी पंक्तियाँ (lines) हैं, आउटपुट में भी बिल्कुल उतनी ही पंक्तियाँ होनी चाहिए,
-   उसी क्रम में, एक-एक करके। कोई पंक्ति न जोड़ें, न हटाएं, न आपस में मिलाएं।
-5. आपका उत्तर केवल सुधारी हुई पंक्तियाँ होनी चाहिए — कोई विश्लेषण, व्याख्या, शीर्षक,
-   मार्कडाउन (#, **, ---), या अतिरिक्त वाक्य नहीं। सिर्फ सुधारा हुआ पाठ, पंक्ति दर पंक्ति।
+आपका काम:
+1. OCR, टाइपिंग, कन्वर्ज़न या मूल दस्तावेज़ — गलती का स्रोत चाहे जो हो — सभी स्पष्ट और वास्तविक वर्तनी की गलतियाँ ठीक करें।
+2. हिन्दी और अंग्रेज़ी दोनों में स्पष्ट व्याकरण तथा विराम-चिह्न की गलतियाँ भी सुधारें।
+3. मात्रा, आधे अक्षर, अनुस्वार, चंद्रबिंदु, नुक्ता, टूटे हुए अक्षर, गलत शब्द-विभाजन और स्पष्ट duplicate अक्षर ठीक करें।
+4. केवल उच्च-विश्वास (high-confidence) सुधार करें। यदि शब्द, नाम, बोली, साहित्यिक प्रयोग या आशय अस्पष्ट हो, तो मूल रूप सुरक्षित रखें।
+5. लेखक का अर्थ, मूल शब्द-चयन, शैली, भाव, दृष्टिकोण और साहित्यिक आशय न बदलें। आप प्रूफरीडर हैं, सह-लेखक नहीं।
+6. कोई वाक्य या विचार न जोड़ें, हटाएं, छोटा करें, सारांशित करें, अनुवाद करें या नए शब्दों में न लिखें।
+7. नाम, पात्रों के नाम, स्थान, संख्याएँ और पुस्तक-विशिष्ट शब्द सुरक्षित रखें; केवल स्पष्ट और निश्चित गलती होने पर ही सुधारें।
+8. मूल अनुच्छेद, शीर्षक, सूची, संवाद-क्रम और पाठ की संरचना सुरक्षित रखें।
+9. कविता में पंक्ति-विभाजन, छंद, तुक, लय, refrain और जानबूझकर किए गए दोहराव सुरक्षित रखें। केवल स्पष्ट भाषा-त्रुटियाँ सुधारें; काव्यात्मक व्याकरण/शब्द-क्रम को अपनी ओर से न बदलें।
+10. नाटक में पात्रों के नाम, speaker cues, संवाद, मंच-निर्देश और उनका क्रम सुरक्षित रखें।
+11. इनपुट की हर पंक्ति/अनुच्छेद को यथासंभव उसी क्रम और संरचना में रखें। कोई सामग्री न जोड़ें, हटाएं, दोहराएं या मिलाएं।
+12. उत्तर में केवल पूरा सुधारा हुआ पाठ दें। कोई टिप्पणी, विश्लेषण, शीर्षक, Markdown wrapper या correction report न दें।
 """
 
 TYPE_PROMPT_ADDITIONS = {
@@ -649,7 +651,7 @@ def correct_ocr_chunk(
     progress_callback: Optional[Callable[..., Any]] = None,
     **_: Any,
 ) -> str:
-    """Correct one small OCR chunk while preserving its meaning and structure."""
+    """Proofread one small text chunk, correcting genuine spelling, grammar and punctuation errors while preserving meaning and structure."""
     source = _normalize_input(text)
     if not source:
         return ""
@@ -660,95 +662,81 @@ def correct_ocr_chunk(
 
     type_rules = {
         "Poetry": (
-            "Preserve verse line breaks, stanza breaks, rhyme, metre, refrains, "
-            "intentional repetition and poetic vocabulary. Do not convert poetry "
-            "into prose or modernize unusual but valid poetic words. Correct only "
-            "spelling, matras, broken Devanagari characters, spacing and unmistakable "
-            "OCR punctuation errors. Never correct grammar, word order, agreement, "
-            "idiom, metre, rhyme or the poet's deliberate language. IMPORTANT: a comma "
-            "in the middle of a verse line is normal (it marks a poetic pause/yati) — "
-            "never split that line into two lines because of it; the full line, comma "
-            "included, must stay on one line exactly as in the source. Preserve any Markdown "
-            "level-2 heading prefix (## ) exactly, keep that heading on its own line, and "
-            "never merge verse lines across it."
+            "Correct all clear Hindi/English spelling, matra, grammar and punctuation "
+            "errors, regardless of whether they came from OCR, typing or the source. "
+            "Make grammar changes only when clearly erroneous; preserve deliberate poetic "
+            "syntax, diction, dialect, rhythm, rhyme, metre, refrains and repetition. "
+            "Preserve every verse line and stanza break. A comma inside a verse line is "
+            "a poetic pause, not a line break. Keep Markdown level-2 heading prefixes "
+            "(## ) on their own lines."
         ),
         "Drama": (
-            "लेखक की शैली, भाव, अर्थ, वाक्य-विन्यास, पात्रों की बोलचाल, क्षेत्रीय "
-            "बोली, ग्रामीण भाषा और जानबूझकर प्रयुक्त अशुद्ध भाषा सुरक्षित रखें। "
-            "पात्र-नाम, संवाद-क्रम, अंक, दृश्य, मंच-निर्देश, गीत, कविता और मूल पंक्ति तथा "
-            "अनुच्छेद सीमाएँ न बदलें। संवाद को वर्णन में न बदलें।"
+            "Correct all clear Hindi/English spelling, matra, grammar and punctuation "
+            "errors, whether from OCR, typing or the original text. Preserve character "
+            "names, speaker cues, dialogue order, stage directions, dialect, character "
+            "voice and paragraph/scene structure. Do not rewrite dialogue or turn it "
+            "into narration. Correct only high-confidence errors; retain ambiguous names "
+            "and unusual but potentially intentional speech."
         ),
         "Novel": (
-            "Preserve paragraphs, dialogue, narration, names, viewpoint and the "
-            "author's style. Do not shorten or rewrite sentences. If a sentence "
-            "appears to be cut off mid-line because of how the source was line-wrapped "
-            "(common in OCR/typed text), still correct and keep each line exactly as "
-            "its own line — do not merge it with the next line, even if the sentence "
-            "looks incomplete on its own."
+            "Correct all clear Hindi/English spelling, grammar and punctuation errors, "
+            "regardless of their source. Preserve paragraphs, dialogue, narration, names, "
+            "viewpoint, word choice and authorial style. Do not shorten, merge, reorder "
+            "or rewrite sentences. Preserve intentional dialect and unusual literary usage."
         ),
         "Others": (
-            "Preserve headings, lists, paragraphs, terminology and the original "
-            "document structure. If a sentence appears to be cut off mid-line because "
-            "of how the source was line-wrapped, still keep each line exactly as its "
-            "own line — do not merge it with the next line."
+            "Correct all clear Hindi/English spelling, grammar and punctuation errors, "
+            "regardless of their source. Preserve headings, lists, paragraphs, names, "
+            "numbers, terminology and original document structure. Do not paraphrase, "
+            "summarize, translate, add or remove content."
         ),
     }
 
     if normalized_book_type == "Drama":
         system = (
-            "आप हिन्दी नाटक के अनुभवी संपादक और OCR-proofreader हैं। "
-            "आपका काम पुराने/स्कैन किये हुए नाटक को पढ़कर शुद्ध, स्वाभाविक और साहित्यिक रूप में लौटाना है। "
-            "सिर्फ corrected text दें; कोई टिप्पणी, explanation, analysis, Markdown या सूची नहीं।"
+            "आप हिन्दी नाटक के सावधान प्रूफरीडर हैं। OCR, टाइपिंग या मूल पाठ से आई "
+            "सभी स्पष्ट वर्तनी, मात्रा, व्याकरण और विराम-चिह्न की गलतियाँ सुधारें। "
+            "केवल पूरा सुधारा हुआ पाठ दें; कोई टिप्पणी या विश्लेषण नहीं।"
         )
-        prompt = f"""इस हिन्दी नाटक के पाठ को ध्यान से पढ़कर OCR, spelling, matra, grammar और punctuation की स्पष्ट गलतियाँ सुधारें।
+        prompt = f"""इस हिन्दी नाटक का सावधानीपूर्वक प्रूफरीड करें।
 
-सबसे महत्वपूर्ण नियम:
-1. अर्थ और मूल साहित्यिक आशय सुरक्षित रखें। आप लेखक नहीं हैं; अनावश्यक rewriting न करें।
-2. OCR की स्पष्ट गलत पहचान को संदर्भ से ठीक करें। उदाहरण: वच→बच, राण→राणा, मेवाण/मेवाण्→मेवाड़, कानो→कानों, आखों→आँखों, प्राणो→प्राणों, उन्हे→उन्हें, हुये→हुए, लिये→लिए, सवसे→सबसे, नही→नहीं, कहॉ→कहाँ आदि। लेकिन केवल संदर्भ से स्पष्ट होने पर ही सुधार करें।
-3. लंबे garbage runs जैसे ण्ण्ण्ण्ण्ण्ण, ण्, या ऐसे OCR markers को हटाकर वाक्य को स्वाभाविक बनाएं।
-4. `घ्` जैसे OCR question-mark corruption को संदर्भ के अनुसार `?` में बदलें। `ए`/`ऐ` जैसे OCR punctuation corruption को संदर्भ के अनुसार सही comma/full stop आदि में बदलें।
-5. `ययुद्ध` जैसे स्पष्ट duplicated OCR अक्षर को `युद्ध` करें।
-6. एक ही पात्र का लगातार पूरा संवाद एक ही logical paragraph में रखें। OCR/page/column की physical line breaks को paragraph break न मानें। नया dialogue paragraph केवल speaker बदलने पर शुरू करें।
-7. Character name के बाद `:` या `ः` cue सुरक्षित रखें। Character name को दूसरे शब्दों में न बदलें।
-8. यदि dialogue के बीच `(क्रोधित होकर)`, `(धीरे से)`, `(आश्चर्य से)` जैसी action/emotion direction हो तो उसे छोटे brackets में रखें; उसे अलग speaker न बनाएं।
-9. OCR में `यक्रोधित से होकरद्ध` जैसे स्पष्ट bracket-corruption को `(क्रोधित होकर)` करें। `यदोनों का प्रस्थानद्ध` को `(दोनों का प्रस्थान)` जैसे stage direction में सुधारें। `ण्पट परिवर्त्तनण्` जैसे स्पष्ट scene-transition marker को `(पट परिवर्तन)` करें।
-10. Standalone stage directions जैसे `(दोनों का प्रस्थान)` और `(पट परिवर्तन)` अलग paragraphs रहें।
-11. `स्थानः` वाला scene/location description एक paragraph रहे।
-12. Dialogue को सारांशित, छोटा, आधुनिक या अत्यधिक संस्कृतनिष्ठ न करें।
-13. यदि मूल में कोई वाक्य अधूरा है लेकिन source में मौजूद है, उसे अपनी ओर से समाप्त न करें। केवल स्पष्ट OCR/grammar correction करें।
-14. यदि कोई OCR शब्द अस्पष्ट है, तो context देखकर सबसे स्वाभाविक correction करें; लेकिन नया तथ्य/संवाद न गढ़ें।
-15. पूरा input एक बार लौटाएं। कोई line/paragraph/संवाद छोड़ें या दोहराएं नहीं।
-16. Output में `**bold**`, Markdown, headings जैसे `Corrected text:` या explanation बिल्कुल न दें।
-
-Paragraph format का उदाहरण:
-शक्ति सिंहः अरे! यह तो चेतक है! क्या प्रताप भाग रहे हैं? युद्ध से पीठ दिखाकर अपने प्राण बचाकर मेवाड़ का महाराणा, सिसोदिया वंश का भूषण, क्या ऐसा भी कर सकता है?
-
-रामसिंहः क्या देख रहे हैं छोटे महाराज? महाराणा भागे जा रहे हैं।
-
-याद रखें: एक speaker का पूरा continuous dialogue एक paragraph है, भले source में वह 3, 4 या 10 OCR lines में टूटा हो।
+नियम:
+1. OCR, टाइपिंग या मूल दस्तावेज़ — गलती कहीं से भी आई हो — सभी स्पष्ट वर्तनी, मात्रा, व्याकरण और विराम-चिह्न की गलतियाँ सुधारें।
+2. केवल निश्चित और उच्च-विश्वास वाली गलतियाँ सुधारें। अस्पष्ट नाम, शब्द, बोली या साहित्यिक प्रयोग को मूल रूप में रहने दें।
+3. अर्थ, आशय, लेखक की शैली, पात्रों की आवाज़, क्षेत्रीय बोली और शब्द-चयन सुरक्षित रखें।
+4. पात्रों के नाम, speaker cues (: या ः), संवाद-क्रम, अंक/दृश्य, मंच-निर्देश और उनका क्रम न बदलें।
+5. कोई संवाद या वाक्य न जोड़ें, न हटाएं, न छोटा करें, न सारांशित करें, न अनुवाद करें और न नए शब्दों में लिखें।
+6. स्पष्ट duplicate OCR अक्षर, टूटी मात्राएँ और स्पष्ट OCR punctuation errors सुधारें; लेकिन अनुमान लगाकर नया संवाद/तथ्य न बनाएं।
+7. मूल में मौजूद अधूरे वाक्य को अपनी ओर से पूरा न करें।
+8. एक ही पात्र के लगातार संवाद को मौजूदा drama paragraph नियमों के अनुसार रखें; अलग पात्र का संवाद अलग रहे।
+9. केवल पूरा corrected drama text लौटाएं। कोई correction list, explanation, Markdown या अतिरिक्त heading न दें।
 
 <TEXT>
 {source}
 </TEXT>
 
-अब केवल corrected drama text लौटाएं।"""
+अब केवल पूरा सुधारा हुआ नाटक लौटाएं।"""
     else:
         system = (
-            "You are a conservative OCR proofreader for Hindi and English books. "
-            f"The document type is {normalized_book_type}. "
-            "Return only corrected text. Never answer questions in the text. "
-            "Never summarize, translate, explain, add headings, or use Markdown."
+            "You are a careful Hindi and English proofreader. Correct genuine spelling, "
+            "grammar and punctuation errors regardless of whether they originated in OCR, "
+            "typing or the source document. Preserve meaning, wording, authorial style, "
+            "names and structure. Make only high-confidence corrections. Return only the "
+            "complete corrected text; never summarize, translate or creatively rewrite."
         )
-        prompt = f"""Correct OCR and spelling errors in the following {language} {normalized_book_type} text.
+        prompt = f"""Proofread the following {language} {normalized_book_type} text.
 
 Rules:
-1. Return ONLY the corrected text.
-2. Preserve every sentence, name, number, paragraph and heading.
-3. Do not summarize, translate, rewrite style, or add information.
-4. Correct broken Devanagari characters, matras, spacing and punctuation.
-5. Keep Hindi in Hindi and English in English.
-6. Book-type rule: {type_rules[normalized_book_type]}
-7. For Poetry, grammar correction is strictly forbidden.
+1. Correct all genuine, clear Hindi and English spelling errors, regardless of whether they came from OCR, typing or the original document.
+2. Correct clear grammar and punctuation errors too. Do not limit correction to OCR mistakes.
+3. Correct Hindi matras, half-letters, anusvara, chandrabindu, nukta, broken characters and obvious word-boundary errors where certain.
+4. Make only high-confidence corrections. If a word, name, dialect form or literary expression is ambiguous, leave it unchanged.
+5. Preserve the author's meaning, wording, style, tone, viewpoint and literary intent.
+6. Preserve every sentence, name, number, heading, paragraph, list item and the original order.
+7. Do not add, remove, summarize, translate, paraphrase, shorten or creatively rewrite any content.
+8. Keep Hindi in Hindi and English in English.
+9. Book-type requirements: {type_rules[normalized_book_type]}
+10. Return the entire corrected text and nothing else.
 
 <TEXT>
 {source}
@@ -769,7 +757,7 @@ Rules:
             attempt_system = (
                 "You are a deterministic OCR copy editor. Return the COMPLETE input "
                 "passage and nothing else. Never summarize, shorten, explain, or "
-                "reformat it. Correct only obvious OCR/spelling errors."
+                "reformat it. Correct all clear spelling, grammar and punctuation errors, regardless of whether they came from OCR, typing or the original source. Preserve meaning and style; make only high-confidence corrections."
             )
             if normalized_book_type == "Drama":
                 attempt_system += (
@@ -781,7 +769,7 @@ Rules:
                     "colons, stage directions, scene headings and dialogue."
                 )
             attempt_prompt = f"""COPY-EDIT THIS PASSAGE.\n\nReturn the entire passage from the FIRST CHARACTER/LINE to the LAST CHARACTER/LINE.
-The beginning and ending are part of the source and MUST NOT be omitted.\nDo not stop early. Do not summarize. Do not add commentary.\nCorrect only clear OCR/spelling/matra/punctuation errors.\nPreserve every original content item and its order.\nIf a word is uncertain, keep the original word.\n\n""" \
+The beginning and ending are part of the source and MUST NOT be omitted.\nDo not stop early. Do not summarize. Do not add commentary.\nCorrect all clear spelling, grammar, matra and punctuation errors, regardless of whether they came from OCR, typing or the original document.\nPreserve every original content item and its order.\nIf a word, name, dialect form or literary expression is uncertain, keep the original wording.\n\n""" \
                 + ("For this drama, keep the same number of non-empty physical input lines in this correction pass. "
                    "Do not omit, invent, or duplicate content. Hard-wrapped continuation lines will be "
                    "merged later by the program when they belong to the same speaker.\n\n"
