@@ -95,6 +95,14 @@ def split_for_tts(
                 del verse_buffer[:2]
 
         heading_pattern = re.compile(r"^#{1,5}\s+\S")
+
+        def ensure_line_pause(value: str) -> str:
+            """Add sentence-ending punctuation so TTS pauses between lines."""
+            value = value.strip()
+            if value and not re.search(r"[.!?।॥…]$", value):
+                value += "."
+            return value
+
         for raw_line in text.splitlines():
             line = raw_line.strip()
             if not line:
@@ -104,10 +112,10 @@ def split_for_tts(
                 flush_verse_buffer()
                 title = re.sub(r"^#{1,5}\s+", "", line).strip()
                 if title:
-                    sections.append(title)
+                    sections.append(ensure_line_pause(title))
                 continue
 
-            verse_buffer.append(line)
+            verse_buffer.append(ensure_line_pause(line))
             if len(verse_buffer) == 2:
                 sections.append("\n".join(verse_buffer))
                 verse_buffer.clear()
