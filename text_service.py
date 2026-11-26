@@ -82,35 +82,34 @@ def split_for_tts(
     if not text:
         return []
 
-    # Poetry uses a heading-aware, two-verse-line section layout.
-    # Word Heading 2 paragraphs are exported with a Markdown "## " prefix:
-    # each heading is a standalone TTS section, followed by verse sections
-    # containing at most two lines (about 20 seconds of narration).
-    # DOCX extraction inserts blank separators between Word paragraphs, so ignore blank lines.
+    # Poetry only: Word Heading 1–5 are standalone title sections.
+    # Other non-empty lines are verse; group them in pairs, flushing before
+    # the next title and at end-of-book. A final single line is retained.
     if str(book_type or "Others").strip().casefold() == "poetry":
         sections: list[str] = []
         verse_buffer: list[str] = []
 
         def flush_verse_buffer() -> None:
             while verse_buffer:
-                sections.append("\n".join(verse_buffer[:2]))
+                sections.append("\\n".join(verse_buffer[:2]))
                 del verse_buffer[:2]
 
+        heading_pattern = re.compile(r"^#{1,5}\\s+\\S")
         for raw_line in text.splitlines():
             line = raw_line.strip()
             if not line:
                 continue
 
-            # Only Markdown level-2 headings are treated as Word Heading 2.
-            if re.match(r"^##\s+", line):
+            if heading_pattern.match(line):
                 flush_verse_buffer()
-                # Use the marker only for section detection; do not show or speak it.
-                sections.append(re.sub(r"^##\s+", "", line).strip())
+                title = re.sub(r"^#{1,5}\\s+", "", line).strip()
+                if title:
+                    sections.append(title)
                 continue
 
             verse_buffer.append(line)
             if len(verse_buffer) == 2:
-                sections.append("\n".join(verse_buffer))
+                sections.append("\\n".join(verse_buffer))
                 verse_buffer.clear()
 
         flush_verse_buffer()
