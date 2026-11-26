@@ -94,7 +94,7 @@ def split_for_tts(
                 sections.append("\n".join(verse_buffer[:2]))
                 del verse_buffer[:2]
 
-        heading_pattern = re.compile(r"^#{1,5}\s+\\S")
+        heading_pattern = re.compile(r"^#{1,5}\s+\S")
         for raw_line in text.splitlines():
             line = raw_line.strip()
             if not line:
