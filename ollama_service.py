@@ -762,7 +762,7 @@ Rules:
             if normalized_book_type == "Drama":
                 attempt_system += (
                     " This is drama. Preserve every piece of content and its order while "
-                    "correcting only clear OCR/spelling errors. Keep the physical input "
+                    "correcting all clear spelling, grammar and punctuation errors, regardless of their source. Keep the physical input "
                     "lines during this correction pass so validation can verify completeness; "
                     "the final post-processing step will merge hard-wrapped continuation lines "
                     "of the same speaker into one logical paragraph. Preserve character names, "
