@@ -180,7 +180,7 @@ def _fingerprint(text: str, book_type: str, max_characters: int) -> str:
     # Bump this version whenever sectioning rules change. This invalidates
     # cached sections produced by older splitters, even when text/settings
     # are otherwise identical.
-    splitter_version = "heading-aware-poetry-v3"
+    splitter_version = "heading-aware-poetry-v4-heading1-5"
     payload = f"{splitter_version}|{book_type}|{int(max_characters)}|{text}"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
