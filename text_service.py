@@ -103,12 +103,21 @@ def split_for_tts(
                 value += "."
             return value
 
+        first_content_line = True
         for raw_line in text.splitlines():
             line = raw_line.strip()
             if not line:
                 continue
 
-            if heading_pattern.match(line):
+            # Fallback for DOCX titles whose Heading 1–5 style marker was
+            # lost during extraction/editing/proofreading: treat the first
+            # non-empty line of a Poetry document as a standalone title.
+            is_heading = bool(heading_pattern.match(line))
+            if first_content_line and not is_heading:
+                is_heading = True
+            first_content_line = False
+
+            if is_heading:
                 flush_verse_buffer()
                 title = re.sub(r"^#{1,5}\s+", "", line).strip()
                 if title:
