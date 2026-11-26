@@ -395,12 +395,12 @@ def extract_docx(
                 style = getattr(block, "style", None)
                 style_name = str(getattr(style, "name", "") or "").strip().casefold()
                 style_id = str(getattr(style, "style_id", "") or "").strip().casefold()
-                heading_match = re.fullmatch(r"heading\\s*([1-5])", style_name)
+                heading_match = re.fullmatch(r"heading\s*([1-5])", style_name)
                 if not heading_match:
                     heading_match = re.fullmatch(r"heading([1-5])(?:char)?", style_id)
                 if heading_match:
                     level = int(heading_match.group(1))
-                    text = ("#" * level) + " " + re.sub(r"^#+\\s*", "", text).strip()
+                    text = ("#" * level) + " " + re.sub(r"^#+\s*", "", text).strip()
 
         elif isinstance(block, Table):
             text = table_to_text(block).strip()
