@@ -387,7 +387,7 @@ def _normalize_input(text: str) -> str:
 
 def _restore_poetry_heading_markers(source: str, corrected: str) -> str:
     """Restore Word Heading 1–5 markers if the proofreader drops them."""
-    heading_pattern = re.compile(r"^\s*(#{1,5})\s+\\S")
+    heading_pattern = re.compile(r"^\s*(#{1,5})\s+\S")
     headings = []
     for line in str(source or "").splitlines():
         match = heading_pattern.match(line)
