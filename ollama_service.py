@@ -157,7 +157,7 @@ TYPE_PROMPT_ADDITIONS = {
 """,
 }
 
-USER_TEMPLATE = "इन {n} पंक्तियों में हिन्दी/अंग्रेज़ी की सभी स्पष्ट वर्तनी, मात्रा, व्याकरण और विराम-चिह्न की गलतियाँ सुधारें — चाहे गलती OCR, टाइपिंग या मूल दस्तावेज़ से आई हो। अर्थ, लेखक की शैली, शब्द-चयन और पंक्ति-क्रम सुरक्षित रखें। अनिश्चित शब्द को न बदलें। ठीक {n} पंक्तियाँ लौटाएं; कोई पंक्ति जोड़ें, हटाएं या मिलाएं नहीं। कविता की पंक्ति के बीच का अल्पविराम देखकर पंक्ति न तोड़ें:\\n\\n{text}"
+USER_TEMPLATE = "इन {n} पंक्तियों में हिन्दी/अंग्रेज़ी की सभी स्पष्ट वर्तनी, मात्रा, व्याकरण और विराम-चिह्न की गलतियाँ सुधारें — चाहे गलती OCR, टाइपिंग या मूल दस्तावेज़ से आई हो। अर्थ, लेखक की शैली, शब्द-चयन और पंक्ति-क्रम सुरक्षित रखें। अनिश्चित शब्द को न बदलें। ठीक {n} पंक्तियाँ लौटाएं; कोई पंक्ति जोड़ें, हटाएं या मिलाएं नहीं। कविता की पंक्ति के बीच का अल्पविराम देखकर पंक्ति न तोड़ें:\n\n{text}"
 
 _INVALID_MARKERS = ["###", "**", "---"]
 
@@ -387,13 +387,13 @@ def _normalize_input(text: str) -> str:
 
 def _restore_poetry_heading_markers(source: str, corrected: str) -> str:
     """Restore Word Heading 1–5 markers if the proofreader drops them."""
-    heading_pattern = re.compile(r"^\\s*(#{1,5})\\s+\\S")
+    heading_pattern = re.compile(r"^\s*(#{1,5})\s+\\S")
     headings = []
     for line in str(source or "").splitlines():
         match = heading_pattern.match(line)
         if match:
             marker = match.group(1)
-            title = re.sub(r"^#{1,5}\\s+", "", line.strip()).strip()
+            title = re.sub(r"^#{1,5}\s+", "", line.strip()).strip()
             headings.append((marker, title))
     if not headings:
         return corrected
@@ -401,12 +401,12 @@ def _restore_poetry_heading_markers(source: str, corrected: str) -> str:
     lines = str(corrected or "").splitlines()
     for marker, heading in headings:
         for index, line in enumerate(lines):
-            candidate = re.sub(r"^#{1,5}\\s+", "", line.strip()).strip()
+            candidate = re.sub(r"^#{1,5}\s+", "", line.strip()).strip()
             if candidate == heading:
                 lines[index] = f"{marker} {heading}"
                 break
 
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 def _split_text(text: str, maximum: int) -> list[TextChunk]:
     """Split on paragraph/sentence boundaries while preserving order."""
