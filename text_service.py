@@ -24,11 +24,11 @@ def clean_text(text: str):
     text = text.replace("\u00ad", "")  # soft hyphen
 
     # Clean horizontal whitespace only; never join separate text lines.
-    text = re.sub(r"[\\t\\f\\v ]+", " ", text)
-    text = re.sub(r" *\\n *", "\\n", text)
+    text = re.sub(r"[\t\f\v ]+", " ", text)
+    text = re.sub(r" *\n *", "\n", text)
 
     # Keep one blank line between paragraphs, headings and verse blocks.
-    text = re.sub(r"\\n{3,}", "\\n\\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
 
     return text.strip()
 
