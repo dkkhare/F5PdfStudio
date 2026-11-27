@@ -2999,7 +2999,7 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
                 ("Fish Speech — Colab GPU", "fishspeech"),
                 ("Gemini TTS — cloud + replicated voice", "gemini"),
                 ("kVoive — Kaggle dual-GPU Hindi TTS API", "kvoive"),
-            ], value="f5tts", label="Audio engine")
+            ], value="f5tts", label="Audio engine", allow_custom_value=True)
         with gr.Group(visible=True) as reference_audio_group:
             with gr.Row():
                 reference_audio = gr.Audio(label="Reference audio", type="filepath")
