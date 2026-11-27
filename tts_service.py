@@ -33,6 +33,7 @@ from typing import Any, Callable, Iterable, Optional, Sequence
 
 from tts_provider import synthesize_sarvam, synthesize_voicestudio, synthesize_voicebox
 from remote_colab_service import fish_speech_tts
+from kvoive_client import tts as kvoive_tts, submit_batch as kvoive_submit_batch, job_status as kvoive_job_status, download_book as kvoive_download_book, pause as kvoive_pause, resume as kvoive_resume, stop as kvoive_stop
 
 
 SAMPLE_RATE = 24_000
@@ -96,6 +97,8 @@ class GenerationResult:
 _pause_event = threading.Event()
 _stop_event = threading.Event()
 _control_lock = threading.RLock()
+_kvoive_job_lock = threading.Lock()
+_kvoive_active_job: dict[str, str] = {}
 _model_lock = threading.RLock()
 
 # Set means paused.  It begins cleared (running).
@@ -112,12 +115,28 @@ _cached_vocab: Optional[str] = None
 def request_pause() -> str:
     with _control_lock:
         _pause_event.set()
+    with _kvoive_job_lock:
+        active = dict(_kvoive_active_job)
+    if active.get("job_id"):
+        try:
+            kvoive_pause(active["job_id"], api_url=active["api_url"], api_key=active["api_key"])
+            return "Pause sent to kVoive. It takes effect after the current section finishes."
+        except Exception as exc:
+            return f"Pause requested locally; kVoive pause API reported: {exc}"
     return "Pause requested. Generation will pause after the current audio batch."
 
 
 def request_resume() -> str:
     with _control_lock:
         _pause_event.clear()
+    with _kvoive_job_lock:
+        active = dict(_kvoive_active_job)
+    if active.get("job_id"):
+        try:
+            kvoive_resume(active["job_id"], api_url=active["api_url"], api_key=active["api_key"])
+            return "kVoive job resumed."
+        except Exception as exc:
+            return f"Resume requested locally; kVoive resume API reported: {exc}"
     return "Generation resumed."
 
 
@@ -125,6 +144,14 @@ def request_stop() -> str:
     with _control_lock:
         _stop_event.set()
         _pause_event.clear()  # release a paused worker so it can stop
+    with _kvoive_job_lock:
+        active = dict(_kvoive_active_job)
+    if active.get("job_id"):
+        try:
+            kvoive_stop(active["job_id"], api_url=active["api_url"], api_key=active["api_key"])
+            return "Stop sent to kVoive. It takes effect after the current section; local checkpoint is preserved."
+        except Exception as exc:
+            return f"Stop requested locally; kVoive stop API reported: {exc}"
     return "Stop requested. The checkpoint will be preserved."
 
 
@@ -490,6 +517,33 @@ def _trim_edge_silence(
     return audio[start:end]
 
 
+def _apply_wav_gain(path: Path, gain_db: float) -> None:
+    """Apply output gain to a generated 16-bit PCM WAV, in decibels."""
+    gain_db = max(-24.0, min(24.0, float(gain_db or 0.0)))
+    if abs(gain_db) < 0.001:
+        return
+    import numpy as np
+
+    temporary = path.with_suffix(path.suffix + ".gain.tmp")
+    try:
+        with wave.open(str(path), "rb") as source:
+            params = source.getparams()
+            if params.sampwidth != 2:
+                raise RuntimeError(
+                    f"Volume adjustment supports 16-bit PCM WAV only: {path.name}"
+                )
+            raw = source.readframes(source.getnframes())
+        samples = np.frombuffer(raw, dtype="<i2").astype(np.float32)
+        multiplier = 10.0 ** (gain_db / 20.0)
+        adjusted = np.clip(samples * multiplier, -32768.0, 32767.0).astype("<i2")
+        with wave.open(str(temporary), "wb") as target:
+            target.setparams(params)
+            target.writeframes(adjusted.tobytes())
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def _write_wav(path: Path, audio: Any, sample_rate: int = SAMPLE_RATE) -> None:
     import numpy as np
 
@@ -668,6 +722,26 @@ def _save_checkpoint(path: Path, data: dict[str, Any]) -> None:
     temporary.replace(path)
 
 
+def _is_complete_wav(path: Path) -> bool:
+    """Return True only for a readable, non-empty WAV file.
+
+    This also recovers a section whose WAV was fully written immediately
+    before a disconnect prevented the checkpoint JSON from being updated.
+    """
+    if not path.is_file():
+        return False
+    try:
+        with wave.open(str(path), "rb") as audio:
+            return (
+                audio.getnchannels() > 0
+                and audio.getframerate() > 0
+                and audio.getsampwidth() > 0
+                and audio.getnframes() > 0
+            )
+    except (OSError, EOFError, wave.Error):
+        return False
+
+
 def combine_wav_files(
     files: Iterable[str | Path],
     output_path: str | Path,
@@ -780,11 +854,65 @@ def _generate_remote_section(
     speed: float,
     progress_callback: Optional[Callable[..., Any]],
     inter_batch_pause_ms: int = 120,
+    kvoive_api_url: str = "",
+    kvoive_api_key: str = "",
+    kvoive_voice: str = "",
+    kvoive_content_type: str = "auto",
+    kvoive_gender: str = "",
+    kvoive_lufs: Optional[float] = -16,
+    kvoive_speakers: Optional[dict[str, Any]] = None,
+    kvoive_type_options: Optional[dict[str, Any]] = None,
 ) -> None:
-    """Generate one section through VoiceStudio or Sarvam and write one WAV."""
+    """Generate one section through a configured remote TTS provider."""
     import numpy as np
 
     engine = str(provider_engine or "").strip().lower()
+    if engine == "kvoive":
+        # One remote batch per local section preserves F5PdfStudio checkpoint/resume
+        # while using the worker's dual-GPU scheduler and native remote controls.
+        remote_book = re.sub(r"[^A-Za-z0-9._-]+", "_", output_path.stem).strip("._-") or "F5PdfStudio"
+        job_id = kvoive_submit_batch(
+            remote_book, "1", [("0001", text, kvoive_content_type or "auto", kvoive_speakers or None)],
+            api_url=kvoive_api_url or None, api_key=kvoive_api_key or None,
+            voice=kvoive_voice or None, language="hi", fmt="wav", respect_lines=True,
+            resume=True, lufs=kvoive_lufs, content_type=kvoive_content_type or "auto",
+            speakers=kvoive_speakers or None, type_options=kvoive_type_options or None,
+            gender=kvoive_gender or None,
+        )
+        with _kvoive_job_lock:
+            _kvoive_active_job.clear()
+            _kvoive_active_job.update({"job_id": job_id, "api_url": kvoive_api_url, "api_key": kvoive_api_key})
+        try:
+            while True:
+                status = kvoive_job_status(job_id, api_url=kvoive_api_url or None, api_key=kvoive_api_key or None)
+                state = str(status.get("status") or "").lower()
+                done = int(status.get("done") or status.get("completed") or 0)
+                total = int(status.get("total") or 1)
+                _notify(progress_callback, {"message": f"kVoive remote job {job_id}: {state} ({done}/{total})",
+                    "status": state, "completed": done, "total": total,
+                    "percentage": 100.0 * done / max(1, total), "voice_notes": status.get("voice_notes")}, done, total)
+                if state in ("done", "done_with_errors", "stopped", "failed"):
+                    break
+                time.sleep(4)
+            if state == "stopped":
+                raise GenerationStopped("kVoive job stopped by user; local section checkpoint will be preserved.")
+            if state != "done":
+                raise RuntimeError(f"kVoive batch ended with status '{state}': {json.dumps(status, ensure_ascii=False)[:1200]}")
+            download_dir = output_path.parent / ".kvoive_downloads" / remote_book
+            downloaded = kvoive_download_book(remote_book, download_dir, api_url=kvoive_api_url or None, api_key=kvoive_api_key or None)
+            wavs = [download_dir / Path(name).name for name in downloaded if str(name).lower().endswith(".wav")]
+            wavs = [path for path in wavs if path.exists()]
+            if not wavs:
+                raise RuntimeError(f"kVoive job completed but no WAV was listed for book '{remote_book}'.")
+            shutil.copy2(wavs[0], output_path)
+            section_status = (status.get("sections") or {}).get("0001", {}) if isinstance(status.get("sections"), dict) else {}
+            notes = section_status.get("voice_notes") or status.get("voice_notes") or []
+            if notes:
+                _notify(progress_callback, "kVoive voice fallback notes: " + json.dumps(notes, ensure_ascii=False))
+        finally:
+            with _kvoive_job_lock:
+                _kvoive_active_job.clear()
+        return
     if engine not in {"voicestudio", "voicebox", "sarvam", "fishspeech", "gemini"}:
         raise ValueError(f"Unsupported remote TTS engine: {provider_engine}")
 
@@ -919,6 +1047,15 @@ def generate_audiobook(
     voicebox_engine = str(kwargs.get("voicebox_engine") or "qwen").strip()
     colab_url = str(kwargs.get("colab_url") or "").strip()
     colab_token = str(kwargs.get("colab_token") or "").strip()
+    kvoive_api_url = str(kwargs.get("kvoive_api_url") or os.getenv("TTS_API_URL") or "https://definitions-taxation-essay-excited.trycloudflare.com").strip()
+    kvoive_api_key = str(kwargs.get("kvoive_api_key") or os.getenv("TTS_API_KEY") or "").strip()
+    kvoive_voice = str(kwargs.get("kvoive_voice") or "").strip()
+    kvoive_content_type = str(kwargs.get("kvoive_content_type") or "auto").strip()
+    kvoive_gender = str(kwargs.get("kvoive_gender") or "").strip()
+    kvoive_lufs = kwargs.get("kvoive_lufs", -16)
+    kvoive_speakers = kwargs.get("kvoive_speakers") or None
+    kvoive_type_options = kwargs.get("kvoive_type_options") or None
+    volume_gain_db = max(-24.0, min(24.0, float(kwargs.get("volume_gain_db", 0.0) or 0.0)))
 
     normalised = _normalise_sections(sections)
     if not normalised:
@@ -951,17 +1088,19 @@ def generate_audiobook(
     previous_engine = str(previous.get("provider_engine") or provider_engine).strip().lower()
     previous_voice = str(previous.get("provider_voice") or "").strip().lower()
     if provider_engine == "f5tts":
-        current_voice = str(ref_path or "")
+        current_voice = f"{str(ref_path or '')}|gain={volume_gain_db}"
     elif provider_engine == "voicestudio":
-        current_voice = voicestudio_voice
+        current_voice = f"{voicestudio_voice}|gain={volume_gain_db}"
     elif provider_engine == "voicebox":
-        current_voice = f"{voicebox_profile}|{voicebox_language}|{voicebox_model_size}|{voicebox_engine}"
+        current_voice = f"{voicebox_profile}|{voicebox_language}|{voicebox_model_size}|{voicebox_engine}|gain={volume_gain_db}"
     elif provider_engine == "fishspeech":
-        current_voice = fish_reference_id
+        current_voice = f"{fish_reference_id}|gain={volume_gain_db}"
     elif provider_engine == "gemini":
-        current_voice = f"{gemini_model}|{gemini_voice_id}"
+        current_voice = f"{gemini_model}|{gemini_voice_id}|gain={volume_gain_db}"
+    elif provider_engine == "kvoive":
+        current_voice = f"{kvoive_api_url}|{kvoive_voice}|{kvoive_content_type}|{kvoive_gender}|{kvoive_lufs}|gain={volume_gain_db}"
     else:
-        current_voice = sarvam_speaker
+        current_voice = f"{sarvam_speaker}|gain={volume_gain_db}"
     if previous and (previous_engine != provider_engine or previous_voice != current_voice.lower()):
         previous = {}
     if previous and str(previous.get("sections_fingerprint") or "") != sections_fingerprint:
@@ -971,6 +1110,25 @@ def generate_audiobook(
         for value in previous.get("completed_sections", [])
         if str(value).isdigit()
     }
+
+    # Recover fully written section WAVs when a disconnect happened after
+    # audio was saved but before its completed_sections checkpoint was flushed.
+    # This recovery is intentionally allowed only after the checkpoint's
+    # engine, voice/settings and exact text fingerprint have been validated.
+    if resume and previous:
+        recovered = []
+        for ordinal in range(1, len(normalised) + 1):
+            section_file = _pipeline.audio_section_path(destination, ordinal)
+            if ordinal not in completed and _is_complete_wav(section_file):
+                completed.add(ordinal)
+                recovered.append(ordinal)
+        if recovered:
+            _notify(
+                progress_callback,
+                "Recovered completed audio sections after the previous interruption: "
+                + ", ".join(str(value) for value in recovered),
+            )
+
     section_files: list[str] = []
     total = len(normalised)
     stopped = False
@@ -1055,7 +1213,16 @@ def generate_audiobook(
                         speed=float(speed),
                         progress_callback=progress_callback,
                         inter_batch_pause_ms=int(inter_batch_pause_ms),
+                    kvoive_api_url=kvoive_api_url,
+                    kvoive_api_key=kvoive_api_key,
+                    kvoive_voice=kvoive_voice,
+                    kvoive_content_type=kvoive_content_type,
+                    kvoive_gender=kvoive_gender,
+                    kvoive_lufs=kvoive_lufs,
+                    kvoive_speakers=kvoive_speakers,
+                    kvoive_type_options=kvoive_type_options,
                     )
+                _apply_wav_gain(section_file, volume_gain_db)
             except GenerationStopped:
                 raise
             except Exception as exc:

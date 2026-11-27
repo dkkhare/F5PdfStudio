@@ -37,6 +37,8 @@ from text_service import (
     split_for_tts,
 )
 
+from kvoive_client import (DEFAULT_API_URL as KVOIVE_DEFAULT_API_URL, check_health as check_kvoive_health, list_voices as list_kvoive_voices, list_content_types as list_kvoive_content_types, register_voice as register_kvoive_voice, delete_voice as delete_kvoive_voice)
+
 from tts_provider import (
     SARVAM_SPEAKERS,
     check_voicestudio,
@@ -108,6 +110,98 @@ from ltx_api_manager import (
 )
 
 
+
+from kvideo_client import check_server as check_kvideo_server, generate as generate_kvideo
+
+
+def check_kvideo_server_from_ui(api_url, api_key):
+    try:
+        return check_kvideo_server(api_url, api_key)
+    except Exception as exc:
+        return f"kVideo connection failed: {type(exc).__name__}: {exc}"
+
+
+def start_kvideo_video_generation(
+    api_url, api_key, workflow_file, corrected_text, project_name, book_name, part_number,
+    author_name, poet_image, burn_text=True, output_resolution="1920x1080",
+    subtitle_font="Nirmala UI", subtitle_font_size=28, max_clip_minutes=10.0,
+):
+    """Generate section videos with the uploaded ComfyUI API workflow and resume by checkpoint."""
+    if not str(api_url or "").strip():
+        raise gr.Error("Enter the kVideo API URL.")
+    if not str(project_name or "").strip() or not str(book_name or "").strip() or not str(part_number or "").strip():
+        raise gr.Error("Open/create a project with its project name, book name and part number first.")
+    if not workflow_file or not Path(str(workflow_file)).is_file():
+        raise gr.Error("Upload the ComfyUI API workflow JSON (Workflow > Export (API)).")
+    if not poet_image or not Path(str(poet_image)).is_file():
+        raise gr.Error("Upload the reference portrait/image used by the workflow.")
+    _message, project_dir_text = open_or_create_project(project_name, book_name, part_number, author_name)
+    project_dir = Path(project_dir_text)
+    sections = _video_sections(project_dir, corrected_text)
+    if not sections:
+        raise gr.Error("No video sections could be prepared.")
+    audio_paths = [_project_audio_section(project_dir, number) for number in range(1, len(sections) + 1)]
+    missing = [number for number, path in enumerate(audio_paths, 1) if not path or not Path(path).is_file()]
+    if missing:
+        raise gr.Error(f"Generate the audiobook first. Missing section audio: {missing[:10]}.")
+
+    image_copy = _copy_project_asset(poet_image, project_dir, "kvideo_reference_image")
+    workflow_copy = _copy_project_asset(workflow_file, project_dir, "kvideo_api_workflow")
+    workflow_digest = hashlib.sha256(Path(workflow_copy).read_bytes()).hexdigest()
+    image_digest = hashlib.sha256(Path(image_copy).read_bytes()).hexdigest()
+    api_base = str(api_url).strip().rstrip("/")
+    settings = {
+        "workflow_name": Path(workflow_copy).name,
+        "workflow_sha256": workflow_digest,
+        "image": image_copy,
+        "image_sha256": image_digest,
+        # Keep the legacy checkpoint-signature values so completed sections from
+        # earlier runs remain resumable. These values are metadata only: the call
+        # below passes None, so the uploaded ComfyUI workflow controls duration.
+        "extra_seconds": 2.0,
+        "max_seconds": 9.6,
+        "audio_piece_seconds": 9.6,
+    }
+    base_prompt = (
+        "Create a realistic audio-conditioned video. Preserve the identity, face, clothing and "
+        "appearance of the reference image. Match natural facial and body movement to the supplied "
+        "audio, with accurate lip synchronization. Avoid exaggerated movement, camera cuts and identity drift. "
+    )
+
+    def generate_piece(piece_number, piece_count, output_path, piece_audio, seconds):
+        section_prompt = base_prompt + "Scene context: " + str(current_section_text[0])[:2500]
+        return generate_kvideo(
+            api_base, workflow_copy, image_copy, piece_audio, output_path,
+            # Preserve max_seconds and extra_seconds exactly as supplied in the uploaded workflow.
+            extra_seconds=None, max_seconds=None, prompt=section_prompt,
+            timeout=3600, api_key=api_key or "",
+        )
+
+    current_section_text = [""]
+    def generate_one(index, section_text, destination, audio_file):
+        current_section_text[0] = str(section_text or "")
+        # Submit the complete audiobook section as one continuous audio input.
+        # Duration and tail padding are controlled by AudioPadToVideoLength in the uploaded workflow.
+        generate_piece(1, 1, destination, Path(audio_file), 0.0)
+
+    engine_name = "kvideo_ltx_audio"
+    def runner(notify):
+        return _remote_video_sections(
+            engine=engine_name, project_dir=project_dir, sections=sections, settings=settings,
+            generator=generate_one, mux_audio=False, require_audio=True, burn=burn_text,
+            resolution=output_resolution, font_name=subtitle_font, font_size=subtitle_font_size,
+            max_clip_minutes=max_clip_minutes, notify=notify,
+        )
+
+    def finalize(result):
+        preview, downloads = _video_outputs(result)
+        status = _video_status_text("kVideo (ComfyUI API)", result)
+        save_project_state(project_dir, {"kvideo_video": preview, "kvideo_status": status})
+        return status, preview, downloads
+
+    yield from _live_video_job("kVideo (ComfyUI API)", runner, finalize)
+
+
 def refresh_voicestudio_voice_choices():
     try:
         voices = list_voicestudio_voices()
@@ -115,6 +209,46 @@ def refresh_voicestudio_voice_choices():
         return gr.Dropdown(choices=choices, value=choices[0], label="VoiceStudio voice/profile ID")
     except Exception as exc:
         return gr.Dropdown(choices=["default"], value="default", label=f"VoiceStudio voice/profile ID (API unavailable: {exc})")
+
+def refresh_kvoive_voice_choices(api_url, api_key):
+    try:
+        raw = list_kvoive_voices(api_url=api_url, api_key=api_key)
+        voices = raw.get("voices", raw) if isinstance(raw, dict) else raw
+        choices = [v.get("voice_id") or v.get("id") or v.get("name") for v in voices if isinstance(v, dict)]
+        choices = [str(v) for v in choices if v]
+        return gr.Dropdown(choices=[""] + choices, value=choices[0] if choices else "", label="kVoive cloned narrator voice")
+    except Exception as exc:
+        return gr.Dropdown(choices=[""], value="", label=f"kVoive voices (API error: {exc})", allow_custom_value=True)
+
+def kvoive_register_voice_from_ui(api_url, api_key, voice_id, ref_audio, ref_text, gender, replace):
+    if not ref_audio:
+        raise gr.Error("Upload the clean 3–10 second reference voice clip in the Reference audio field.")
+    if not str(ref_text or "").strip():
+        raise gr.Error("Enter the exact transcript spoken in the reference clip.")
+    try:
+        result = register_kvoive_voice(voice_id, ref_audio, ref_text, api_url=api_url, api_key=api_key,
+                                       lang="hi", gender=gender or None, replace=bool(replace))
+        return f"kVoive voice registered: {json.dumps(result, ensure_ascii=False)}"
+    except Exception as exc:
+        raise gr.Error(f"kVoive voice registration failed: {exc}") from exc
+
+def kvoive_delete_voice_from_ui(api_url, api_key, voice_id):
+    if not str(voice_id or "").strip():
+        raise gr.Error("Select or enter a kVoive voice ID first.")
+    try:
+        result = delete_kvoive_voice(voice_id, api_url=api_url, api_key=api_key)
+        return f"kVoive voice deleted: {json.dumps(result, ensure_ascii=False)}"
+    except Exception as exc:
+        raise gr.Error(f"kVoive voice deletion failed: {exc}") from exc
+
+def check_kvoive_from_ui(api_url, api_key):
+    try:
+        health = check_kvoive_health(api_url)
+        voices = list_kvoive_voices(api_url=api_url, api_key=api_key)
+        types = list_kvoive_content_types(api_url=api_url, api_key=api_key)
+        return "Health: " + json.dumps(health, ensure_ascii=False) + "\nVoices: " + json.dumps(voices, ensure_ascii=False) + "\nContent types: " + json.dumps(types, ensure_ascii=False)
+    except Exception as exc:
+        return f"kVoive connection failed: {exc}"
 
 def refresh_voicebox_profile_choices():
     try:
@@ -205,7 +339,7 @@ def open_selected_project(selection):
             DEFAULT_REFERENCE_TRANSCRIPT, "Ready", None, None, None, 0,
             None, "Video not started.", None, None, None, 0, "poet_reciting_poem_1080p.mp4",
             1200, "f5tts", "default", "", "hi", "0.6B", "qwen", "shubh", "",
-            "", DEFAULT_COLAB_URL, "", "auto", 0.95, 750, 450, 1234, 32, True,
+            "", DEFAULT_COLAB_URL, "", "auto", 0.95, 750, 450, 1234, 32, 0.0, True,
             DEFAULT_SADTALKER_DIR, DEFAULT_SADTALKER_ENV, "crop", 256, True, "1920x1080",
             True, "Nirmala UI", 28, "Crossfade", 0.4,
             "Ready", "", "t2v-A14B", "", "", "480*832", 17, 8, -1, 1,
@@ -234,7 +368,7 @@ def open_selected_project(selection):
         state.get("voicebox_profile", ""), state.get("voicebox_language", "hi"), state.get("voicebox_model_size", "0.6B"), state.get("voicebox_engine", "qwen"),
         state.get("sarvam_speaker", "shubh"), "", state.get("fish_reference_id", ""), state.get("colab_url", DEFAULT_COLAB_URL), "",
         state.get("device_choice", "auto"), float(state.get("speech_speed", 0.95)), int(state.get("pause_duration", 750)), int(state.get("poetry_line_pause_duration", 450)),
-        int(state.get("seed", 1234)), int(state.get("nfe_steps", 32)), bool(state.get("create_mp3", True)), state.get("sadtalker_directory", DEFAULT_SADTALKER_DIR),
+        int(state.get("seed", 1234)), int(state.get("nfe_steps", 32)), float(state.get("volume_gain_db", 0.0)), bool(state.get("create_mp3", True)), state.get("sadtalker_directory", DEFAULT_SADTALKER_DIR),
         state.get("sadtalker_environment", DEFAULT_SADTALKER_ENV), state.get("preprocess_mode", "crop"), int(state.get("video_model_size", 256)),
         bool(state.get("still_mode", True)), state.get("output_resolution", "1920x1080"), bool(state.get("burn_subtitles", True)),
         state.get("subtitle_font", "Nirmala UI"), int(state.get("subtitle_font_size", 28)), state.get("video_transition", "Crossfade"), float(state.get("video_transition_duration", 0.4)),
@@ -1338,6 +1472,14 @@ def start_generation(
     gemini_api_key,
     gemini_model,
     gemini_voice_id,
+    kvoive_api_url,
+    kvoive_api_key,
+    kvoive_voice,
+    kvoive_content_type,
+    kvoive_gender,
+    kvoive_lufs,
+    kvoive_speakers_json,
+    kvoive_type_options_json,
     colab_url,
     colab_token,
     speech_speed,
@@ -1346,6 +1488,7 @@ def start_generation(
     device_choice,
     seed,
     nfe_steps,
+    volume_gain_db,
     create_mp3,
     ollama_model,
 ):
@@ -1379,6 +1522,16 @@ def start_generation(
             raise gr.Error("Enter the Gemini API key.")
         if not str(gemini_voice_id or '').strip():
             raise gr.Error("Create/select a Gemini replicated voice ID first, or enter a prebuilt voice name such as Kore.")
+    elif selected_engine == "kvoive":
+        if not str(kvoive_api_key or os.getenv("TTS_API_KEY") or "").strip():
+            raise gr.Error("Enter the kVoive API key or set TTS_API_KEY in the environment.")
+        if not str(kvoive_api_url or os.getenv("TTS_API_URL") or KVOIVE_DEFAULT_API_URL).strip():
+            raise gr.Error("Enter the kVoive API URL.")
+        try:
+            if str(kvoive_speakers_json or "").strip(): json.loads(kvoive_speakers_json)
+            if str(kvoive_type_options_json or "").strip(): json.loads(kvoive_type_options_json)
+        except json.JSONDecodeError as exc:
+            raise gr.Error(f"kVoive JSON settings are invalid: {exc}") from exc
 
     if not project_name:
         raise gr.Error(
@@ -1412,6 +1565,14 @@ def start_generation(
         "reference_transcript": str(reference_transcript),
         "gemini_tts_model": str(gemini_model or ''),
         "gemini_tts_voice_id": str(gemini_voice_id or ''),
+        "kvoive_api_url": str(kvoive_api_url or KVOIVE_DEFAULT_API_URL),
+        "kvoive_voice": str(kvoive_voice or ""),
+        "kvoive_content_type": str(kvoive_content_type or "auto"),
+        "kvoive_gender": str(kvoive_gender or ""),
+        "kvoive_lufs": float(kvoive_lufs) if kvoive_lufs not in (None, "") else -16,
+        "kvoive_speakers_json": str(kvoive_speakers_json or ""),
+        "kvoive_type_options_json": str(kvoive_type_options_json or ""),
+        # kVoive API keys are never persisted in project JSON.
         "audio_status": "Audio generation started.",
         "max_characters": int(maximum_characters),
         "device_choice": str(device_choice or "auto"),
@@ -1421,6 +1582,7 @@ def start_generation(
         "seed": int(seed),
         "nfe_steps": int(nfe_steps),
         "create_mp3": bool(create_mp3),
+        "volume_gain_db": float(volume_gain_db or 0.0),
     })
 
     if (
@@ -1563,6 +1725,14 @@ def start_generation(
                 gemini_api_key=str(gemini_api_key or ""),
                 gemini_model=str(gemini_model or GEMINI_DEFAULT_TTS_MODEL),
                 gemini_voice_id=str(gemini_voice_id or ""),
+                kvoive_api_url=str(kvoive_api_url or KVOIVE_DEFAULT_API_URL),
+                kvoive_api_key=str(kvoive_api_key or ""),
+                kvoive_voice=str(kvoive_voice or ""),
+                kvoive_content_type=str(kvoive_content_type or "auto"),
+                kvoive_gender=str(kvoive_gender or ""),
+                kvoive_lufs=float(kvoive_lufs) if kvoive_lufs not in (None, "") else -16,
+                kvoive_speakers=json.loads(kvoive_speakers_json) if str(kvoive_speakers_json or "").strip() else None,
+                kvoive_type_options=json.loads(kvoive_type_options_json) if str(kvoive_type_options_json or "").strip() else None,
                 colab_url=str(colab_url or DEFAULT_COLAB_URL),
                 colab_token=str(colab_token or ""),
                 speed=float(
@@ -1582,6 +1752,7 @@ def start_generation(
                 nfe_steps=int(
                     nfe_steps
                 ),
+                volume_gain_db=float(volume_gain_db or 0.0),
                 create_mp3=bool(
                     create_mp3
                 ),
@@ -2656,7 +2827,7 @@ def _correction_engine_visibility(engine):
 def _audio_engine_visibility(engine):
     engine = str(engine or "f5tts").lower()
     return (
-        gr.update(visible=engine in {"f5tts", "voicestudio"}),
+        gr.update(visible=engine in {"f5tts", "voicestudio", "kvoive"}),
         gr.update(visible=engine == "f5tts"),
         gr.update(visible=engine == "voicestudio"),
         gr.update(visible=engine == "voicestudio"),
@@ -2666,6 +2837,7 @@ def _audio_engine_visibility(engine):
         gr.update(visible=engine == "fishspeech"),
         gr.update(visible=engine == "gemini"),
         gr.update(visible=engine == "fishspeech"),   # Colab connection: only Fish Speech needs it here
+        gr.update(visible=engine == "kvoive"),
     )
 
 def _video_engine_visibility(engine):
@@ -2675,6 +2847,7 @@ def _video_engine_visibility(engine):
         gr.update(visible=engine == "wan2.2"),
         gr.update(visible=engine == "ltx2.5"),
         gr.update(visible=engine == "ltx2.3"),
+        gr.update(visible=engine == "kvideo"),
         gr.update(visible=engine in {"wan2.2", "ltx2.5"}),   # Colab media server: only Wan2.2 / LTX-2.5
     )
 
@@ -2825,7 +2998,8 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
                 ("Sarvam Bulbul v3 — cloud", "sarvam"),
                 ("Fish Speech — Colab GPU", "fishspeech"),
                 ("Gemini TTS — cloud + replicated voice", "gemini"),
-            ], value="f5tts", label="Audio engine")
+                ("kVoive — Kaggle dual-GPU Hindi TTS API", "kvoive"),
+            ], value="f5tts", label="Audio engine", allow_custom_value=True)
         with gr.Group(visible=True) as reference_audio_group:
             with gr.Row():
                 reference_audio = gr.Audio(label="Reference audio", type="filepath")
@@ -2860,6 +3034,27 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
             fish_reference_status = gr.Textbox(label="Fish Speech reference status", value="deven — registered reference voice", interactive=False, lines=2)
             gr.Markdown("Fish Speech uses the native `reference_id` API. Reference voices can be persisted on Google Drive by the Colab media server.")
 
+        with gr.Group(visible=False) as kvoive_audio_group:
+            gr.Markdown("### kVoive — Hindi TTS API (Kaggle worker pool)")
+            with gr.Row():
+                kvoive_api_url = gr.Textbox(value=KVOIVE_DEFAULT_API_URL, label="kVoive API URL")
+                kvoive_api_key = gr.Textbox(value="", type="password", label="kVoive API key (not saved)")
+                check_kvoive_button = gr.Button("Check kVoive API")
+            with gr.Row():
+                kvoive_voice = gr.Dropdown(choices=[""], value="", allow_custom_value=True, label="Narrator / cloned voice ID")
+                refresh_kvoive_voices_button = gr.Button("Refresh cloned voices")
+                kvoive_content_type = gr.Dropdown(choices=["auto", "poetry", "drama", "story", "novel", "prose"], value="auto", label="Content type")
+            with gr.Row():
+                kvoive_gender = gr.Dropdown(choices=[("Auto / infer", ""), ("Male", "m"), ("Female", "f")], value="", label="Narrator gender fallback")
+                kvoive_lufs = gr.Slider(-24, -8, value=-16, step=1, label="Master loudness (LUFS)")
+                kvoive_replace_voice = gr.Checkbox(value=False, label="Replace existing clone with same ID")
+            with gr.Row():
+                kvoive_new_voice_id = gr.Textbox(label="New cloned voice ID", placeholder="e.g. my_voice")
+                register_kvoive_voice_button = gr.Button("Register clone from Reference audio")
+                delete_kvoive_voice_button = gr.Button("Delete selected clone", variant="stop")
+            kvoive_speakers_json = gr.Textbox(label="Drama speakers JSON (optional)", lines=3, placeholder='{"राम":{"voice":"ram_clone","gender":"m"},"सीता":{"voice":"sita_clone","gender":"f"}}')
+            kvoive_type_options_json = gr.Textbox(label="Advanced type options JSON (optional)", lines=2, placeholder='{"line_pause":800} or {"stage_directions":"skip"}')
+            kvoive_status = gr.Textbox(label="kVoive API / voice status", lines=5, interactive=False)
         with gr.Group(visible=False) as gemini_audio_group:
             with gr.Row():
                 gemini_audio_model = gr.Dropdown(choices=["gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts"], value=GEMINI_DEFAULT_TTS_MODEL, label="Gemini TTS model")
@@ -2879,6 +3074,7 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
         with gr.Row():
             pause_duration = gr.Slider(0, 2000, value=750, step=50, label="Silence between sections (ms)")
             poetry_line_pause_duration = gr.Slider(200, 1200, value=450, step=50, label="Poetry line pause (ms)")
+            volume_gain_db = gr.Slider(-12, 12, value=0, step=1, label="Output volume (dB): decrease / increase")
             create_mp3 = gr.Checkbox(value=True, label="Create MP3")
         with gr.Group(visible=False) as voicestudio_refresh_group:
             refresh_vs_voices_button = gr.Button("Refresh VoiceStudio voices")
@@ -2903,7 +3099,7 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
             "whole video, and the clip is saved as `<book>_<part>_<nnn>.mp4` in the project's `video/sections` folder. "
             "When all sections are finished they are combined into clips of at most the length below; a section is never cut."
         )
-        video_engine = gr.Dropdown(choices=[("SadTalker — local", "sadtalker"), ("Wan2.2 — Colab", "wan2.2"), ("LTX-2.5 — Colab", "ltx2.5"), ("LTX-2.3 / LTX-2.5 Pose — LTX API worker pool", "ltx2.3")], value="sadtalker", label="Video engine")
+        video_engine = gr.Dropdown(choices=[("SadTalker — local", "sadtalker"), ("Wan2.2 — Colab", "wan2.2"), ("LTX-2.5 — Colab", "ltx2.5"), ("LTX-2.3 / LTX-2.5 Pose — LTX API worker pool", "ltx2.3"), ("kVideo — API workflow", "kvideo")], value="sadtalker", label="Video engine")
         ltx_workers_timer = gr.Timer(30) if hasattr(gr, "Timer") else None
         poet_image = gr.Image(label="Portrait / character image", type="filepath", sources=["upload"])
         poet_image_state = gr.State(value=None)
@@ -2966,6 +3162,26 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
             wan_status = gr.Textbox(label="Wan2.2 Colab status", lines=8, interactive=False, elem_classes=["status-output"])
             wan_preview = gr.Video(label="Wan2.2 result")
             wan_download = gr.File(label="Download combined clips / section videos", file_count="multiple")
+
+        with gr.Group(visible=False) as kvideo_group:
+            gr.Markdown(
+                "## kVideo — LTX image + audio workflow (ComfyUI API)\n"
+                "Enter the ComfyUI server URL and optional bearer API key, then upload the workflow exported with "
+                "Workflow > Export (API). The workflow must contain LoadImage, LoadAudio, AudioPadToVideoLength, "
+                "LTXVConditioning, and SaveVideo nodes. Each audiobook section is submitted as one continuous "
+                "audio input. The uploaded workflow controls its own max_seconds and extra_seconds values; "
+                "no application-side duration cap or automatic audio splitting is applied."
+            )
+            with gr.Row():
+                kvideo_api = gr.Textbox(label="kVideo API URL", placeholder="https://your-comfyui-tunnel.trycloudflare.com")
+                kvideo_api_key = gr.Textbox(label="kVideo API Key (Bearer; optional)", type="password")
+            kvideo_workflow = gr.File(label="kVideo workflow JSON (Export API)", file_count="single", type="filepath", file_types=[".json"])
+            with gr.Row():
+                check_kvideo_button = gr.Button("Check kVideo Server")
+                generate_kvideo_button = gr.Button("Start / Resume kVideo Video Production", variant="primary")
+            kvideo_status = gr.Textbox(label="kVideo production status", value="Enter the API URL, upload the API workflow JSON, then check the server.", interactive=False, lines=8, elem_classes=["status-output"])
+            kvideo_preview = gr.Video(label="kVideo combined video preview")
+            kvideo_download = gr.File(label="kVideo combined clips / section videos", file_count="multiple")
 
         with gr.Group(visible=False) as ltx_video_group:
             gr.Markdown("## LTX-2.5 — Colab option")
@@ -3128,14 +3344,14 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
     )
     tts_engine.change(
         fn=_audio_engine_visibility, inputs=[tts_engine],
-        outputs=[reference_audio_group, f5tts_audio_group, voicestudio_audio_group, voicestudio_refresh_group, voicebox_audio_group, voicebox_refresh_group, sarvam_audio_group, fishspeech_audio_group, gemini_audio_group, colab_audio_group]
+        outputs=[reference_audio_group, f5tts_audio_group, voicestudio_audio_group, voicestudio_refresh_group, voicebox_audio_group, voicebox_refresh_group, sarvam_audio_group, fishspeech_audio_group, gemini_audio_group, colab_audio_group, kvoive_audio_group]
     )
     video_engine.change(
         fn=_video_engine_visibility, inputs=[video_engine],
-        outputs=[sadtalker_video_group, wan_video_group, ltx_video_group, ltx23_video_group, colab_video_group]
+        outputs=[sadtalker_video_group, wan_video_group, ltx_video_group, ltx23_video_group, kvideo_group, colab_video_group]
     )
 
-    state_outputs = [project_name, book_name, part_number, author_name, project_status, project_output_path, book_type, extracted_text, extraction_status, text_status, ollama_status, section_preview, reference_audio, reference_transcript, progress_status, final_audio, wav_download, mp3_download, audio_progress_bar, poet_image, video_progress_status, final_video_preview, final_video_download, subtitle_download, video_progress_bar, final_video_filename, max_characters, tts_engine, voicestudio_voice, voicebox_profile, voicebox_language, voicebox_model_size, voicebox_engine, sarvam_speaker, sarvam_api_key, fish_reference_id, colab_url, colab_token, device_choice, speech_speed, pause_duration, poetry_line_pause_duration, seed, nfe_steps, create_mp3, sadtalker_directory, sadtalker_environment, preprocess_mode, video_model_size, still_mode, output_resolution, burn_subtitles, subtitle_font, subtitle_font_size, video_transition, video_transition_duration, sadtalker_status, wan_checkpoint, wan_task, wan_prompt, wan_status, wan_size, wan_frame_num, wan_steps, wan_seed, wan_audio_section, ltx_status, ltx_mode, ltx_prompt, ltx_duration, ltx_fps]
+    state_outputs = [project_name, book_name, part_number, author_name, project_status, project_output_path, book_type, extracted_text, extraction_status, text_status, ollama_status, section_preview, reference_audio, reference_transcript, progress_status, final_audio, wav_download, mp3_download, audio_progress_bar, poet_image, video_progress_status, final_video_preview, final_video_download, subtitle_download, video_progress_bar, final_video_filename, max_characters, tts_engine, voicestudio_voice, voicebox_profile, voicebox_language, voicebox_model_size, voicebox_engine, sarvam_speaker, sarvam_api_key, fish_reference_id, colab_url, colab_token, device_choice, speech_speed, pause_duration, poetry_line_pause_duration, seed, nfe_steps, volume_gain_db, create_mp3, sadtalker_directory, sadtalker_environment, preprocess_mode, video_model_size, still_mode, output_resolution, burn_subtitles, subtitle_font, subtitle_font_size, video_transition, video_transition_duration, sadtalker_status, wan_checkpoint, wan_task, wan_prompt, wan_status, wan_size, wan_frame_num, wan_steps, wan_seed, wan_audio_section, ltx_status, ltx_mode, ltx_prompt, ltx_duration, ltx_fps]
     existing_project.change(fn=open_selected_project, inputs=existing_project, outputs=state_outputs).then(fn=refresh_pipeline_status, inputs=project_output_path, outputs=pipeline_status_box, concurrency_id="pipeline_status")
 
     persist_inputs = [project_output_path, extracted_text, book_type, extraction_status, text_status, ollama_status, section_preview, reference_audio, reference_transcript, poet_image_state, final_video_filename, max_characters, tts_engine, voicestudio_voice, voicebox_profile, voicebox_language, voicebox_model_size, voicebox_engine, sarvam_speaker, sarvam_api_key, fish_reference_id, colab_url, colab_token, device_choice, speech_speed, pause_duration, poetry_line_pause_duration, seed, nfe_steps, create_mp3, sadtalker_directory, sadtalker_environment, preprocess_mode, video_model_size, still_mode, output_resolution, burn_subtitles, subtitle_font, subtitle_font_size, video_transition, video_transition_duration, wan_checkpoint, wan_task, wan_prompt, wan_size, wan_frame_num, wan_steps, wan_seed, wan_audio_section, ltx_mode, ltx_prompt, ltx_duration, ltx_fps]
@@ -3145,6 +3361,10 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
 
     refresh_vs_voices_button.click(fn=refresh_voicestudio_voice_choices, inputs=[], outputs=voicestudio_voice)
     refresh_voicebox_button.click(fn=refresh_voicebox_profile_choices, inputs=[], outputs=voicebox_profile)
+    refresh_kvoive_voices_button.click(fn=refresh_kvoive_voice_choices, inputs=[kvoive_api_url, kvoive_api_key], outputs=kvoive_voice)
+    check_kvoive_button.click(fn=check_kvoive_from_ui, inputs=[kvoive_api_url, kvoive_api_key], outputs=kvoive_status)
+    register_kvoive_voice_button.click(fn=kvoive_register_voice_from_ui, inputs=[kvoive_api_url, kvoive_api_key, kvoive_new_voice_id, reference_audio, reference_transcript, kvoive_gender, kvoive_replace_voice], outputs=kvoive_status)
+    delete_kvoive_voice_button.click(fn=kvoive_delete_voice_from_ui, inputs=[kvoive_api_url, kvoive_api_key, kvoive_voice], outputs=kvoive_status)
     refresh_fish_references_button.click(fn=refresh_fish_reference_choices, inputs=[colab_url, colab_token], outputs=[fish_reference_id, fish_reference_status])
     check_colab_button.click(fn=check_colab_from_ui, inputs=[colab_url, colab_token], outputs=colab_status)
     check_wan_colab_button.click(fn=check_colab_from_ui, inputs=[video_colab_url, video_colab_token], outputs=wan_status)
@@ -3152,10 +3372,18 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
     check_video_colab_button.click(fn=check_colab_from_ui, inputs=[video_colab_url, video_colab_token], outputs=video_colab_status)
     colab_url.change(fn=lambda value: value, inputs=colab_url, outputs=video_colab_url)  # same server by default
 
-    generate_button.click(fn=start_generation, inputs=[extracted_text, book_type, book_name, part_number, author_name, reference_audio, reference_transcript, project_name, max_characters, tts_engine, voicestudio_voice, voicebox_profile, voicebox_language, voicebox_model_size, voicebox_engine, sarvam_speaker, sarvam_api_key, fish_reference_id, gemini_api_key_audio, gemini_audio_model, gemini_voice_id, colab_url, colab_token, speech_speed, pause_duration, poetry_line_pause_duration, device_choice, seed, nfe_steps, create_mp3, ollama_model], outputs=[progress_status, final_audio, wav_download, mp3_download, audio_progress_bar], concurrency_limit=1, concurrency_id="generation")
+    generate_button.click(fn=start_generation, inputs=[extracted_text, book_type, book_name, part_number, author_name, reference_audio, reference_transcript, project_name, max_characters, tts_engine, voicestudio_voice, voicebox_profile, voicebox_language, voicebox_model_size, voicebox_engine, sarvam_speaker, sarvam_api_key, fish_reference_id, gemini_api_key_audio, gemini_audio_model, gemini_voice_id, kvoive_api_url, kvoive_api_key, kvoive_voice, kvoive_content_type, kvoive_gender, kvoive_lufs, kvoive_speakers_json, kvoive_type_options_json, colab_url, colab_token, speech_speed, pause_duration, poetry_line_pause_duration, device_choice, seed, nfe_steps, volume_gain_db, create_mp3, ollama_model], outputs=[progress_status, final_audio, wav_download, mp3_download, audio_progress_bar], concurrency_limit=1, concurrency_id="generation")
     pause_button.click(fn=request_pause, inputs=[], outputs=progress_status, concurrency_id="generation_controls")
     resume_button.click(fn=request_resume, inputs=[], outputs=progress_status, concurrency_id="generation_controls")
     stop_button.click(fn=request_stop, inputs=[], outputs=progress_status, concurrency_id="generation_controls")
+
+    check_kvideo_button.click(fn=check_kvideo_server_from_ui, inputs=[kvideo_api, kvideo_api_key], outputs=kvideo_status)
+    generate_kvideo_button.click(
+        fn=start_kvideo_video_generation,
+        inputs=[kvideo_api, kvideo_api_key, kvideo_workflow, extracted_text, project_name, book_name, part_number, author_name, poet_image_state, burn_subtitles, output_resolution, subtitle_font, subtitle_font_size, max_clip_minutes],
+        outputs=[kvideo_status, kvideo_preview, kvideo_download],
+        concurrency_limit=1, concurrency_id="video_generation",
+    )
 
     check_sadtalker_button.click(fn=check_sadtalker_from_ui, inputs=[sadtalker_directory, sadtalker_environment], outputs=sadtalker_status)
     generate_video_button.click(fn=start_video_generation, inputs=[extracted_text, project_name, max_characters, book_type, poet_image_state, sadtalker_directory, sadtalker_environment, preprocess_mode, video_model_size, still_mode, burn_subtitles, subtitle_font, subtitle_font_size, output_resolution, ollama_model, video_transition, video_transition_duration, book_name, author_name, part_number, final_video_filename, max_clip_minutes], outputs=[video_progress_status, final_video_preview, final_video_download, subtitle_download, video_progress_bar], concurrency_limit=1, concurrency_id="video_generation")
