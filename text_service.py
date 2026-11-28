@@ -315,3 +315,28 @@ def split_for_tts(
         )
 
     return sections
+
+
+def split_document_into_tts_chapters(
+    text: str,
+    max_characters: int = 180,
+    book_type: str = "Others",
+) -> list[dict]:
+    """Return the exact chapter/section structure shared by Text Editor and audio production."""
+    cleaned = clean_text(text)
+    if not cleaned:
+        return []
+    result = []
+    for index, chapter in enumerate(detect_chapters(cleaned), start=1):
+        chapter_text = str(chapter.get("text") or "")
+        sections = split_for_tts(
+            chapter_text,
+            int(max_characters),
+            book_type=book_type or "Others",
+        )
+        result.append({
+            "title": chapter.get("title") or f"Chapter {index}",
+            "sections": sections,
+        })
+    return result
+
