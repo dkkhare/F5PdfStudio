@@ -1313,6 +1313,7 @@ def check_installation():
 
 def start_generation(
     corrected_text,
+    section_preview,
     book_type,
     book_name,
     part_number,
@@ -1433,13 +1434,26 @@ def start_generation(
             "between sections and 450 ms between lines."
         )
 
-    # One canonical section list per project: audio, video and the burned text all use it.
-    sections = _video_sections(
-        project_directory,
-        corrected_text,
-        maximum_characters,
-        book_type,
+    # Audio Production must consume the exact section boundaries shown in Text Editor.
+    # Do not run the splitter again here: that was causing the editor's four-line
+    # Poetry sections to be regrouped into smaller sections before provider dispatch.
+    section_pattern = re.compile(
+        r"---\\s*SECTION\\s+\\d+\\s*---\\s*(.*?)(?=\\n\\s*---\\s*SECTION\\s+\\d+\\s*---|\\Z)",
+        re.IGNORECASE | re.DOTALL,
     )
+    sections = [
+        match.group(1).strip()
+        for match in section_pattern.finditer(str(section_preview or ""))
+        if match.group(1).strip()
+    ]
+    if not sections:
+        # Backward-compatible fallback when the user has not clicked Detect Sections.
+        sections = _video_sections(
+            project_directory,
+            corrected_text,
+            maximum_characters,
+            book_type,
+        )
 
     if not sections:
         raise gr.Error(
@@ -3148,7 +3162,7 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
     check_ltx_colab_button.click(fn=check_colab_from_ui, inputs=[video_colab_url, video_colab_token], outputs=ltx_status)
     check_video_colab_button.click(fn=check_colab_from_ui, inputs=[video_colab_url, video_colab_token], outputs=video_colab_status)
 
-    generate_button.click(fn=start_generation, inputs=[extracted_text, book_type, book_name, part_number, author_name, reference_audio, reference_transcript, project_name, max_characters, tts_engine, voicestudio_voice, voicebox_profile, voicebox_language, voicebox_model_size, voicebox_engine, sarvam_speaker, sarvam_api_key, fish_reference_id, chatterbox_url, chatterbox_model_pack, chatterbox_language, gemini_api_key_audio, gemini_audio_model, gemini_voice_id, colab_url, colab_token, speech_speed, pause_duration, poetry_line_pause_duration, device_choice, seed, nfe_steps, create_mp3, ollama_model], outputs=[progress_status, final_audio, wav_download, mp3_download, audio_progress_bar], concurrency_limit=1, concurrency_id="generation")
+    generate_button.click(fn=start_generation, inputs=[extracted_text, section_preview, book_type, book_name, part_number, author_name, reference_audio, reference_transcript, project_name, max_characters, tts_engine, voicestudio_voice, voicebox_profile, voicebox_language, voicebox_model_size, voicebox_engine, sarvam_speaker, sarvam_api_key, fish_reference_id, chatterbox_url, chatterbox_model_pack, chatterbox_language, gemini_api_key_audio, gemini_audio_model, gemini_voice_id, colab_url, colab_token, speech_speed, pause_duration, poetry_line_pause_duration, device_choice, seed, nfe_steps, create_mp3, ollama_model], outputs=[progress_status, final_audio, wav_download, mp3_download, audio_progress_bar], concurrency_limit=1, concurrency_id="generation")
     pause_button.click(fn=request_pause, inputs=[], outputs=progress_status, concurrency_id="generation_controls")
     resume_button.click(fn=request_resume, inputs=[], outputs=progress_status, concurrency_id="generation_controls")
     stop_button.click(fn=request_stop, inputs=[], outputs=progress_status, concurrency_id="generation_controls")
