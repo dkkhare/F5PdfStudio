@@ -1459,6 +1459,22 @@ def start_generation(
         raise gr.Error(
             "No TTS sections could be prepared."
         )
+    # Diagnostic shows the exact logical sections handed to generate_audiobook.
+    section_diagnostic = [
+        "TEXT EDITOR → AUDIO PROVIDER INPUT CHECK",
+        f"Provider: {selected_engine}",
+        f"Total logical sections: {len(sections)}",
+        "",
+    ]
+    for section_number, section_text in enumerate(sections, start=1):
+        nonempty_lines = [line for line in str(section_text).splitlines() if line.strip()]
+        section_diagnostic.extend([
+            f"SECTION {section_number:04d} | {len(nonempty_lines)} lines | {len(section_text)} characters",
+            str(section_text),
+            "-" * 48,
+        ])
+    section_diagnostic_text = "\\n".join(section_diagnostic)
+
     section_weights = [max(1, len(section)) for section in sections]
 
     largest_section = max(
@@ -1641,6 +1657,7 @@ def start_generation(
 
     yield (
         last_status,
+        section_diagnostic_text,
         None,
         None,
         None,
@@ -1659,6 +1676,7 @@ def start_generation(
         except queue.Empty:
             yield (
                 last_status,
+                section_diagnostic_text,
                 None,
                 None,
                 None,
@@ -1694,6 +1712,7 @@ def start_generation(
 
             yield (
                 last_status,
+                section_diagnostic_text,
                 None,
                 None,
                 None,
@@ -1753,6 +1772,7 @@ def start_generation(
 
                 yield (
                     last_status,
+                    section_diagnostic_text,
                     final_wav,
                     final_wav,
                     final_mp3,
@@ -1771,6 +1791,7 @@ def start_generation(
 
                 yield (
                     last_status,
+                    section_diagnostic_text,
                     None,
                     None,
                     None,
@@ -1789,6 +1810,7 @@ def start_generation(
 
                 yield (
                     last_status,
+                    section_diagnostic_text,
                     None,
                     None,
                     None,
@@ -2902,6 +2924,7 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
             resume_button = gr.Button("Resume")
             stop_button = gr.Button("Stop after current section", variant="stop")
         progress_status = gr.Textbox(label="Audio generation progress", value="Ready", lines=12, interactive=False, elem_classes=["status-output"])
+        section_diagnostic = gr.Textbox(label="Exact sections sent to TTS (diagnostic)", value="Generate audio to inspect the exact section text and line counts passed to the provider.", lines=24, interactive=False)
         audio_progress_bar = gr.Slider(0, 100, value=0, step=0.1, label="Audio generation progress (%)", interactive=False)
         final_audio = gr.Audio(label="Completed audiobook preview")
         with gr.Row():
@@ -3162,7 +3185,7 @@ with gr.Blocks(title="F5PdfStudio — Local AI + Colab Media Studio", elem_id="f
     check_ltx_colab_button.click(fn=check_colab_from_ui, inputs=[video_colab_url, video_colab_token], outputs=ltx_status)
     check_video_colab_button.click(fn=check_colab_from_ui, inputs=[video_colab_url, video_colab_token], outputs=video_colab_status)
 
-    generate_button.click(fn=start_generation, inputs=[extracted_text, section_preview, book_type, book_name, part_number, author_name, reference_audio, reference_transcript, project_name, max_characters, tts_engine, voicestudio_voice, voicebox_profile, voicebox_language, voicebox_model_size, voicebox_engine, sarvam_speaker, sarvam_api_key, fish_reference_id, chatterbox_url, chatterbox_model_pack, chatterbox_language, gemini_api_key_audio, gemini_audio_model, gemini_voice_id, colab_url, colab_token, speech_speed, pause_duration, poetry_line_pause_duration, device_choice, seed, nfe_steps, create_mp3, ollama_model], outputs=[progress_status, final_audio, wav_download, mp3_download, audio_progress_bar], concurrency_limit=1, concurrency_id="generation")
+    generate_button.click(fn=start_generation, inputs=[extracted_text, section_preview, book_type, book_name, part_number, author_name, reference_audio, reference_transcript, project_name, max_characters, tts_engine, voicestudio_voice, voicebox_profile, voicebox_language, voicebox_model_size, voicebox_engine, sarvam_speaker, sarvam_api_key, fish_reference_id, chatterbox_url, chatterbox_model_pack, chatterbox_language, gemini_api_key_audio, gemini_audio_model, gemini_voice_id, colab_url, colab_token, speech_speed, pause_duration, poetry_line_pause_duration, device_choice, seed, nfe_steps, create_mp3, ollama_model], outputs=[progress_status, section_diagnostic, final_audio, wav_download, mp3_download, audio_progress_bar], concurrency_limit=1, concurrency_id="generation")
     pause_button.click(fn=request_pause, inputs=[], outputs=progress_status, concurrency_id="generation_controls")
     resume_button.click(fn=request_resume, inputs=[], outputs=progress_status, concurrency_id="generation_controls")
     stop_button.click(fn=request_stop, inputs=[], outputs=progress_status, concurrency_id="generation_controls")
