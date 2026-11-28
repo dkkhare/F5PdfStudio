@@ -35,6 +35,7 @@ from text_service import (
     clean_text,
     detect_chapters,
     split_for_tts,
+    split_document_into_tts_chapters,
 )
 
 from tts_provider import (
@@ -614,32 +615,17 @@ def analyse_chapters(
             "There is no usable text to analyse."
         )
 
-    chapters = detect_chapters(
-        corrected_text
+    chapter_sections = split_document_into_tts_chapters(
+        corrected_text,
+        int(maximum_characters),
+        book_type=book_type or "Others",
     )
-
     all_sections = []
     preview_parts = []
 
-    for chapter_number, chapter in enumerate(
-        chapters,
-        start=1,
-    ):
-        chapter_title = chapter.get(
-            "title",
-            f"Chapter {chapter_number}",
-        )
-
-        chapter_text = chapter.get(
-            "text",
-            "",
-        )
-
-        sections = split_for_tts(
-            chapter_text,
-            int(maximum_characters),
-            book_type=book_type or "Others",
-        )
+    for chapter in chapter_sections:
+        chapter_title = chapter["title"]
+        sections = chapter["sections"]
 
         preview_parts.append(
             f"========== {chapter_title} =========="
@@ -1857,7 +1843,14 @@ def _video_sections(project_directory, corrected_text, maximum_characters=None, 
     # Always go through get_canonical_sections. Its fingerprint includes the
     # book type, size limit and splitter-version, so old text-only cached
     # sections cannot bypass updated Poetry/Heading 2 rules.
-    sections = pipeline.get_canonical_sections(project_directory, text, kind, limit, split_for_tts)
+    # Use the exact same chapter-by-chapter splitter as the Text Editor preview.
+    # This prevents audio production from regrouping the editor's four-line
+    # Poetry sections differently when chapter boundaries are present.
+    def split_like_text_editor(source_text, max_chars, book_type="Others"):
+        chapter_groups = split_document_into_tts_chapters(source_text, max_chars, book_type)
+        return [section for chapter in chapter_groups for section in chapter["sections"]]
+
+    sections = pipeline.get_canonical_sections(project_directory, text, kind, limit, split_like_text_editor)
     pipeline.update_stage(
         project_directory, "sections", "completed", done=len(sections), total=len(sections),
         message=f"{len(sections)} sections ({kind}, up to {limit} characters each).",
