@@ -1438,7 +1438,7 @@ def start_generation(
     # Do not run the splitter again here: that was causing the editor's four-line
     # Poetry sections to be regrouped into smaller sections before provider dispatch.
     section_pattern = re.compile(
-        r"---\s*SECTION\s+\d+\s*---\s*(.*?)(?=\n\s*---\s*SECTION\s+\d+\s*---|\Z)",
+        r"---\s*SECTION\s+\d+\s*---\s*(.*?)(?=\n\s*(?:---\s*SECTION\s+\d+\s*---|={5,}[^\n]*={5,})|\Z)",
         re.IGNORECASE | re.DOTALL,
     )
     sections = [
