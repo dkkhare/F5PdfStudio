@@ -1473,7 +1473,7 @@ def start_generation(
             str(section_text),
             "-" * 48,
         ])
-    section_diagnostic_text = "\\n".join(section_diagnostic)
+    section_diagnostic_text = "\n".join(section_diagnostic)
 
     section_weights = [max(1, len(section)) for section in sections]
 
