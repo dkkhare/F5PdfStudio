@@ -656,7 +656,7 @@ def analyse_chapters(
 
     status = (
         "Text analysis completed.\n"
-        f"Chapters detected: {len(chapters)}\n"
+        f"Chapters detected: {len(chapter_sections)}\n"
         f"TTS sections prepared: "
         f"{len(all_sections)}\n"
         f"Largest section: "
