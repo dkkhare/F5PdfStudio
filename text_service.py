@@ -83,16 +83,16 @@ def split_for_tts(
         return []
 
     # Poetry only: Word Heading 1–5 are standalone title sections.
-    # Other non-empty lines are verse; group them in pairs, flushing before
-    # the next title and at end-of-book. A final single line is retained.
+    # Other non-empty lines are verse; group them in groups of four, flushing before
+    # the next title and at end-of-book. A final partial group is retained.
     if str(book_type or "Others").strip().casefold() == "poetry":
         sections: list[str] = []
         verse_buffer: list[str] = []
 
         def flush_verse_buffer() -> None:
             while verse_buffer:
-                sections.append("\n".join(verse_buffer[:2]))
-                del verse_buffer[:2]
+                sections.append("\n".join(verse_buffer[:4]))
+                del verse_buffer[:4]
 
         heading_pattern = re.compile(r"^#{1,5}\s+\S")
 
@@ -125,7 +125,7 @@ def split_for_tts(
                 continue
 
             verse_buffer.append(ensure_line_pause(line))
-            if len(verse_buffer) == 2:
+            if len(verse_buffer) == 4:
                 sections.append("\n".join(verse_buffer))
                 verse_buffer.clear()
 
